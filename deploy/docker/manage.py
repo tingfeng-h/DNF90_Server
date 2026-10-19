@@ -176,7 +176,7 @@ def generate(c, catalog):
 name = "dnfbridge"
 node_id = "dnfbridge-docker-1"
 environment = "local"
-public_addr = "{c['host_ip']}:7001"
+public_addr = "{c.get('advertise_ip', c['host_ip'])}:7001"
 private_addr = "{c['server_ip']}:18111"
 [cluster]
 id = "local"
@@ -233,7 +233,7 @@ create_databases = false
     env = {
         "DNFBRIDGE_GUILD_SOLO_CREATE": str(solo_create).lower(),
         "DNFBRIDGE_CHANNEL_LISTEN": c["server_ip"] + ":7001",
-        "DNFBRIDGE_GAME_LISTEN_HOST": c["server_ip"], "DNFBRIDGE_SERVER_IP": c["host_ip"],
+        "DNFBRIDGE_GAME_LISTEN_HOST": c["server_ip"], "DNFBRIDGE_SERVER_IP": c.get("advertise_ip", c["host_ip"]),
         "DNFBRIDGE_CHANNEL_INFO_PATH": "data/dnf/" + c.get("channel_file", "channel_info.etc"), "DNFBRIDGE_PVF_PATH": "data/dnf/Script.pvf",
         "DNFBRIDGE_CHANNEL_INFO_BODY_MODE": "latest", "DNFBRIDGE_CHANNEL_SERVER_INDEX": "1",
         "DNFBRIDGE_CHANNEL_ADVERTISE_SERVER_INDEX": str(advertised_server), "DNF_SCRIPT_VERSION": "59",
@@ -268,7 +268,7 @@ create_databases = false
                        "env_file": ["server.env"], "volumes": ["./server:/runtime", "./data:/runtime/data/dnf:ro"],
                        "depends_on": {"db": {"condition": "service_healthy"}}, "mem_limit": c.get("server_memory_limit", "4g"), "logging": logging,
                        "networks": {"private": {"ipv4_address": c["server_ip"]}},
-                       "ports": [f"127.0.0.1:{p}:{p}/tcp" for p in (7001, 17002, 18111)] +
+                       "ports": [f"{c['host_ip']}:{p}:{p}/tcp" for p in (7001, 17002)] + ["127.0.0.1:18111:18111/tcp"] +
                                 [f"{c['host_ip']}:{p}:{p}/tcp" for p in catalog["ports"]] +
                                 [f"{c['host_ip']}:30000-30063:30000-30063/udp"],
                        "healthcheck": {"test": ["CMD", "wget", "-Y", "off", "-q", "-O", "/dev/null", f"http://{c['server_ip']}:17002/api/status"],
