@@ -1,6 +1,7 @@
 FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
 WORKDIR /src
 COPY go-server/go.mod go-server/go.sum ./
+ENV GOPROXY=https://goproxy.cn|https://proxy.golang.org|direct
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY go-server/ ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
