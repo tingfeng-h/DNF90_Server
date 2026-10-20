@@ -47,6 +47,26 @@ func (s *Service) currentChannelReconnectTownTransition(
 		}
 		return currentReconnectLocationProjection(characterID, character, location)
 	}
+	// DNFBRIDGE_RECONNECT_SERIA_ORIGIN=false 时，频道重连不再沿用持久化落点，
+	// 而是走与"选择角色登录"相同的落点解析（城镇自己的赛丽亚房间）。
+	// 默认 true = 逐字节保持旧的持久化落点行为。
+	if !envBool(reconnectSeriaOriginEnv, true) {
+		location, _, _, _, err := s.currentCharacterListLoginLocationForSession(session, characterID, character)
+		if err != nil {
+			return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", err
+		}
+		location.Branch = "channel_reconnect_seria_room"
+		location.Source = "channel_reconnect_login_landing"
+		s.logGameEvent(session, "game-channel-reconnect-seria-location",
+			"char_id", characterID,
+			"town_id", location.TownID,
+			"area_id", location.AreaID,
+			"position_x", location.PositionX,
+			"position_y", location.PositionY,
+			"map_path", location.MapPath,
+			"source", location.Source)
+		return currentReconnectLocationProjection(characterID, character, location)
+	}
 	return s.currentPersistedTownTransition(ctx, session, characterID, character, "channel_reconnect_persisted_location_read_only")
 }
 
