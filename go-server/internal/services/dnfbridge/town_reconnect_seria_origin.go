@@ -8,11 +8,21 @@ import (
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
+// reconnectSeriaOriginEnv 控制频道重连时是否恢复"上次城镇房门来源"。
+// 默认 on = 现有行为（客户端可经 op1425 回到切换频道前站的位置）；
+// off = 不绑该来源，客户端停在本次重连的赛丽亚房间落点。
+const reconnectSeriaOriginEnv = "DNFBRIDGE_RECONNECT_SERIA_ORIGIN"
+
 // 调用方持有townMu。在重连首次1375/23/24之前，沿用普通登录已校验的
 // 持久化房门来源；只恢复房间的出口上下文，不改变房内落点或玩家资产。
 func (s *Service) restoreCurrentReconnectSeriaOriginLocked(ctx context.Context, session *gameSession, characterID uint16, character dnfrepo.CharacterRecord, mapPath string) {
 	session.townPrevVillageSnapshot = currentTownPositionSnapshot{}
 	session.townSeriaRoomEntrySnapshot = currentTownPositionSnapshot{}
+	if !envBool(reconnectSeriaOriginEnv, true) {
+		s.logGameEvent(session, "game-reconnect-seria-origin-skipped",
+			"char_id", characterID, "env", reconnectSeriaOriginEnv)
+		return
+	}
 	if !townMapPathLooksLikeSeria(mapPath) || isPVPChannel(session.channel) {
 		return
 	}
