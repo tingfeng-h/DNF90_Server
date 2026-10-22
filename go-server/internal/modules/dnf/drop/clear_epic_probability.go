@@ -4,7 +4,7 @@ package drop
 const (
 	EpicClearProbabilityBound  = 1000000
 	TimeRiftEpicProbability    = 200000
-	NormalAbyssEpicProbability = 130000
+	NormalAbyssEpicProbability = 1000000
 )
 
 func EpicClearProbabilityHit(roll, probability int) bool {
