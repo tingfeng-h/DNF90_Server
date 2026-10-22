@@ -101,7 +101,7 @@ func (s *Service) handleCurrentDisjointBatchRequest(session *gameSession, body [
 	catalog, err := s.currentPVFItemCatalog()
 	var config currentDisjointPVFConfig
 	if err == nil {
-		config, err = loadCurrentDisjointPVFConfig(catalog.source)
+		config, err = s.cachedCurrentDisjointPVFConfig(catalog.source)
 	}
 	var result currentDisjointBatchResult
 	if err == nil {
@@ -284,7 +284,7 @@ func (s *Service) commitCurrentDisjointItem(ctx context.Context, session *gameSe
 	if s == nil || session == nil || catalog == nil {
 		return errCurrentDisjointUnavailable
 	}
-	config, err := loadCurrentDisjointPVFConfig(catalog.source)
+	config, err := s.cachedCurrentDisjointPVFConfig(catalog.source)
 	if err != nil {
 		return err
 	}

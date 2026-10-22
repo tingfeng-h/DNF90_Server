@@ -69,6 +69,11 @@ type Service struct {
 	nextGameSessionGeneration uint64
 	auctionMaintenanceContext context.Context
 	auctionCategoryExtraOnce  sync.Once
+	// 分解/合成/副职业共用的 PVF 配置是静态的；只解析一次，避免每次 op26 都重新读
+	// etc/disjoint.etc、etc/avatardisjoint/* 造成 CPU/GC 抖动。
+	disjointConfigOnce        sync.Once
+	disjointConfig            currentDisjointPVFConfig
+	disjointConfigErr         error
 	auctionCategoryExpertJobs map[uint32][]byte
 	auctionCategoryExtractors map[uint32]bool
 	auctionCategoryExtraErr   error
