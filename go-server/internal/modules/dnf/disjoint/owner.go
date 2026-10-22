@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -130,6 +132,7 @@ func (o *Owner) mutate(ctx context.Context, operation string, command Command) e
 			return err
 		}
 		inventory = dnfrepo.CloneInventory(inventory)
+		beforeInventory := dnfrepo.CloneInventory(inventory)
 
 		changes, err := command.Project(&Assets{
 			AccountInventory: &accountInventory,
@@ -140,7 +143,19 @@ func (o *Owner) mutate(ctx context.Context, operation string, command Command) e
 		}
 		if changes.Inventory {
 			inventory.UpdatedAt = now
-			if err := dnfrepo.SaveInventoryFields(ctx, inventories, inventory, dnfrepo.InventoryFieldSlots); err != nil {
+			// Default scope (collection) still does the exact legacy full rewrite.
+			// With DNFBRIDGE_INVENTORY_SAVE_SCOPE=slot, only changed slots/extras
+			// are written; this avoids rewriting all 1000+ inventory extra rows
+			// for one disassemble/compound operation and removes the long row-lock
+			// transactions that block the character SELECT ... FOR UPDATE.
+			keys := changedInventorySlotKeys(beforeInventory.Slots, inventory.Slots)
+			if err := dnfrepo.SaveInventoryFieldsScoped(
+				ctx,
+				inventories,
+				inventory,
+				[]dnfrepo.InventoryField{dnfrepo.InventoryFieldSlots},
+				dnfrepo.InventorySlotDeltaKeys{string(dnfrepo.InventoryFieldSlots): keys},
+			); err != nil {
 				return err
 			}
 		}
@@ -152,4 +167,24 @@ func (o *Owner) mutate(ctx context.Context, operation string, command Command) e
 		}
 		return nil
 	})
+}
+
+// changedInventorySlotKeys returns the union of slots added, removed or changed
+// by the projector. The result feeds SaveInventoryFieldsScoped; the default
+// collection scope ignores it and keeps the legacy full rewrite.
+func changedInventorySlotKeys(before, after map[string]dnfrepo.ItemStack) []string {
+	keys := make([]string, 0)
+	for key, oldItem := range before {
+		newItem, exists := after[key]
+		if !exists || !reflect.DeepEqual(oldItem, newItem) {
+			keys = append(keys, key)
+		}
+	}
+	for key := range after {
+		if _, exists := before[key]; !exists {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }

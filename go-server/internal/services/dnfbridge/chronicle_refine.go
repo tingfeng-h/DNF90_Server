@@ -158,7 +158,7 @@ func (s *Service) currentChronicleRefineCommand(session *gameSession, items *pvf
 		State: currentChronicleItemState, SetOptions: currentSetChronicleOptions,
 		WornTarget: currentWornChronicleTarget, WornUpdate: currentWornChronicleUpdate,
 		FailureRewards: func(e dnfchronicle.Equipment, state dnfchronicle.State, m dnfchronicle.Material) ([]dnfchronicle.Reward, error) {
-			config, err := loadCurrentDisjointPVFConfig(items.source)
+			config, err := s.cachedCurrentDisjointPVFConfig(items.source)
 			if err != nil {
 				return nil, err
 			}

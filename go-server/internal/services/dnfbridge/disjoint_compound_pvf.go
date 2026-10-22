@@ -10,6 +10,19 @@ import (
 	dnfpvf "longheng.io/server/internal/modules/dnf/pvf"
 )
 
+// cachedCurrentDisjointPVFConfig 只解析一次静态 PVF 配置。生产环境 PVF 在启动时
+// 加载、运行期不变；这样每次 op26 不再重新解析 etc/disjoint.etc 和
+// etc/avatardisjoint/*，分解批量/逐件请求的 CPU 与 GC 都会明显下降。
+func (s *Service) cachedCurrentDisjointPVFConfig(source dnfpvf.Source) (currentDisjointPVFConfig, error) {
+	if s == nil {
+		return currentDisjointPVFConfig{}, errCurrentDisjointUnavailable
+	}
+	s.disjointConfigOnce.Do(func() {
+		s.disjointConfig, s.disjointConfigErr = loadCurrentDisjointPVFConfig(source)
+	})
+	return s.disjointConfig, s.disjointConfigErr
+}
+
 func loadCurrentDisjointPVFConfig(source dnfpvf.Source) (currentDisjointPVFConfig, error) {
 	if source == nil {
 		return currentDisjointPVFConfig{}, errCurrentDisjointUnavailable

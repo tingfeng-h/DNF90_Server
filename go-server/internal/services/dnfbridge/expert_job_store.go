@@ -1137,7 +1137,7 @@ func (s *Service) commitCurrentExpertJobStoreDisjointBatch(ctx context.Context, 
 			if err != nil {
 				return err
 			}
-			townConfig, err := loadCurrentDisjointPVFConfig(items.source)
+			townConfig, err := s.cachedCurrentDisjointPVFConfig(items.source)
 			if err != nil {
 				return err
 			}
