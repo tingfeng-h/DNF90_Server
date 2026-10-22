@@ -70,5 +70,49 @@ func (s *Service) prepareCurrentTimeRiftLoot(dungeon worldmap.Dungeon, difficult
 
 // Compatibility entry point; native probabilities and roll counts come from PVF.
 func currentNormalAbyssEpicClearReward(request hellPartyRewardRequest) (hellPartyRewardResult, error) {
-	return currentNativePVFHellReward(request)
+	result := hellPartyRewardResult{GroupID: request.GroupID, RewardRollCount: 1, Rate: 100, Chance: dnfdrops.NormalAbyssEpicProbability, RateSource: "operator_per_completed_abyss", Rolls: 1, EpicWindow: dnfdrops.NormalAbyssEpicProbability, EpicWindowSource: "operator_per_completed_abyss", EpicWindowActive: true, EpicExpectationPPM: dnfdrops.NormalAbyssEpicProbability, RarityMode: "epic", RarityAllowed: "4", Pool: "equ"}
+	if request.rng == nil || request.dropCatalog == nil {
+		return result, errDungeonHellPartyRewardDropRule
+	}
+	pool, err := request.dropCatalog.hellPartyRewardEquipmentPool()
+	if err != nil {
+		return result, err
+	}
+	low, high, ok := hellPartyRewardGradeRangeForLevels(request.DungeonMinimumLevel, request.DungeonBasisLevel)
+	if !ok {
+		return result, errDungeonHellPartyRewardLevels
+	}
+	result.GradeMin, result.GradeMax = low, high
+	result.CandidateCount = len(pool.candidates(low, high, hellPartyRewardRarityEpic))
+	if result.CandidateCount == 0 {
+		return result, fmt.Errorf("normal abyss real epic pool empty")
+	}
+	if !dnfdrops.EpicClearProbabilityHit(request.rng.Next(dnfdrops.EpicClearProbabilityBound), dnfdrops.NormalAbyssEpicProbability) {
+		result.Misses = 1
+		return result, nil
+	}
+	// 100% hit: grant 1..4 epics for this completed encounter. Each recipient
+	// gets its own random count (independent drop ownership).
+	count := normalAbyssEpicRandomCount()
+	result.RewardRollCount = int64(count)
+	result.Rolls = count
+	result.EpicExpectationPPM = int64(count) * dnfdrops.EpicClearProbabilityBound
+	for i := 0; i < count; i++ {
+		selection, err := pool.selectEquipmentWithinRarities(
+			request.rng,
+			request.DungeonMinimumLevel,
+			request.DungeonBasisLevel,
+			[]int64{hellPartyRewardRarityEpic},
+			false,
+		)
+		if err != nil {
+			return result, err
+		}
+		if !selection.Selected {
+			return result, fmt.Errorf("normal abyss real epic selection failed")
+		}
+		result.Selected = append(result.Selected, hellPartyRewardItem{ItemID: selection.ItemID, Amount: 1})
+	}
+	result.RaritySelected[hellPartyRewardRarityEpic] = count
+	return result, nil
 }

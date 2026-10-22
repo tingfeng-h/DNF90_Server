@@ -44,7 +44,9 @@ func TestOfficialNormalAbyssPVFZeroRateAndReplay(t *testing.T) {
 	final := last[len(last)-1]
 	rows := death(final)
 	equipment, fragments := abyssEpicFragmentSplit(t, rows)
-	if len(equipment) > 1 || len(fragments) != abyssEpicFragmentTestDefaultAtDifficultyOne {
+	// 这条合成夹具没有 rarity 4 候选，奖励会走 pool-empty 分支；这里只钉住
+	// 不会超过 1..4 的上界，真正的 1..4 发放由下面的合成 .equ 用例覆盖。
+	if len(equipment) > 4 || len(fragments) != abyssEpicFragmentTestDefaultAtDifficultyOne {
 		t.Fatalf("epics=%d fragments=%d", len(equipment), len(fragments))
 	}
 	registered := len(runtime.DropOwner.byObjectKey)
@@ -59,6 +61,45 @@ func TestOfficialNormalAbyssPVFZeroRateAndReplay(t *testing.T) {
 	}
 	if len(runtime.DropOwner.byObjectKey) != registered {
 		t.Fatal("death replay changed reward ledger")
+	}
+}
+
+func TestNormalAbyssEpicCountWeights(t *testing.T) {
+	counts := [5]int{}
+	for roll := 0; roll < len(normalAbyssEpicCountWeights); roll++ {
+		count := normalAbyssEpicCountForRoll(roll)
+		if count < 1 || count > 4 {
+			t.Fatalf("roll=%d count=%d", roll, count)
+		}
+		counts[count]++
+	}
+	want := [5]int{0, 4, 3, 2, 1} // 40% / 30% / 20% / 10%
+	if counts != want {
+		t.Fatalf("weights=%v want=%v", counts, want)
+	}
+	if normalAbyssEpicCountForRoll(-1) != 1 ||
+		normalAbyssEpicCountForRoll(len(normalAbyssEpicCountWeights)) != 1 {
+		t.Fatal("invalid roll must fall back to 1")
+	}
+}
+
+func TestNormalAbyssEpicClearRewardGrantsOneToFour(t *testing.T) {
+	source := hellPartyRewardTestEquSource(hellPartyRewardRarityBandItems())
+	request := hellPartyRewardRarityRequestForTest(t, source, 0)
+	for i := 0; i < 64; i++ {
+		result, err := currentNormalAbyssEpicClearReward(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Chance != 1000000 || result.Rate != 100 {
+			t.Fatalf("chance=%d rate=%d", result.Chance, result.Rate)
+		}
+		if result.Rolls < 1 || result.Rolls > 4 || len(result.Selected) != result.Rolls {
+			t.Fatalf("rolls=%d selected=%d", result.Rolls, len(result.Selected))
+		}
+		if result.RaritySelected[hellPartyRewardRarityEpic] != result.Rolls {
+			t.Fatalf("rarity_selected=%v rolls=%d", result.RaritySelected, result.Rolls)
+		}
 	}
 }
 
@@ -108,13 +149,15 @@ func TestRealPVFTimeRiftAndNormalAbyssProbability(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Rolls != 8 || result.Chance != 1000 || len(result.Selected) > 8 || result.RarityMode != "pvf" {
-			t.Fatal("normal abyss did not use native PVF rolls/rate")
+		if result.Rolls < 1 || result.Rolls > 4 || result.Chance != 1000000 ||
+			len(result.Selected) != result.Rolls || len(result.Selected) > 4 {
+			t.Fatalf("normal abyss did not use one 100%% 1-4 trial: rolls=%d chance=%d selected=%d",
+				result.Rolls, result.Chance, len(result.Selected))
 		}
 		hits += result.RaritySelected[4]
 	}
-	if hits < 400 || hits > 750 {
+	if hits < 10000 || hits > 40000 {
 		t.Fatalf("normal abyss sample: %d/10000", hits)
 	}
-	t.Logf("PVF7539 real equipment=%d mapped pieces=%d; guaranteed fragments=%d; epic=20%%; normal abyss epic sample from 80000 rolls=%d/80000 (PVF rarity 0.7%% per successful roll)", len(def.Equipment), len(def.Pieces), def.FragmentCount, hits)
+	t.Logf("PVF7539 real equipment=%d mapped pieces=%d; guaranteed fragments=%d; epic=20%%; normal abyss 1-4 sample=%d/10000", len(def.Equipment), len(def.Pieces), def.FragmentCount, hits)
 }
