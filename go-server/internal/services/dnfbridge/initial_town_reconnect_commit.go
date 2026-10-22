@@ -12,6 +12,17 @@ import (
 // next town-door request loads the character again, so persist the same landing
 // under the aggregate transaction instead of leaving it in packet-only state.
 func (s *Service) commitCurrentReconnectLocation(ctx context.Context, characterID uint16, projected dnfrepo.CharacterRecord) (dnfrepo.CharacterRecord, error) {
+	return s.commitCurrentReconnectLocationWithOrigin(ctx, characterID, projected, currentTownPositionSnapshot{})
+}
+
+// commitCurrentReconnectLocationWithOrigin persists the shared Seria room's
+// origin (prev_village_* stats) atomically with the landing. The origin is what
+// makes op1375/op1425 treat the room as the player's last town instead of
+// Elvenguard; persisting it here also makes the next channel switch work when
+// the character had no prev_village_* row before this one.
+//
+// A zero snapshot preserves the historical behavior for every non-room landing.
+func (s *Service) commitCurrentReconnectLocationWithOrigin(ctx context.Context, characterID uint16, projected dnfrepo.CharacterRecord, origin currentTownPositionSnapshot) (dnfrepo.CharacterRecord, error) {
 	repositories, ok := s.repositoryGroup()
 	if !ok || repositories.Character == nil {
 		return dnfrepo.CharacterRecord{}, dnfrepo.ErrCharacterSettlementTransactionUnavailable
@@ -24,6 +35,7 @@ func (s *Service) commitCurrentReconnectLocation(ctx context.Context, characterI
 	if !found {
 		return dnfrepo.CharacterRecord{}, fmt.Errorf("reconnect character %s missing", id)
 	}
+	originValid := origin.PositionValid && origin.CharacterID == characterID
 	unchanged := true
 	for _, key := range []string{"town_id", "area_id", "pos_x", "pos_y", "direction", "area_state"} {
 		value, exists := projected.Stats[key]
@@ -31,6 +43,20 @@ func (s *Service) commitCurrentReconnectLocation(ctx context.Context, characterI
 		if !exists || !saved || value != old {
 			unchanged = false
 			break
+		}
+	}
+	if originValid && unchanged {
+		for key, value := range map[string]int64{
+			currentTownPrevVillageTownStat:      int64(origin.TownID),
+			currentTownPrevVillageAreaStat:      int64(origin.AreaID),
+			currentTownPrevVillagePosXStat:      int64(origin.PositionX),
+			currentTownPrevVillagePosYStat:      int64(origin.PositionY),
+			currentTownPrevVillageDirectionStat: int64(origin.MovementCode),
+		} {
+			if old, saved := current.Stats[key]; !saved || old != value {
+				unchanged = false
+				break
+			}
 		}
 	}
 	clearChannelTownOrigin := currentRegisteredChannelTown(current.Stats[currentTownPrevVillageTownStat]) &&
@@ -94,6 +120,9 @@ func (s *Service) commitCurrentReconnectLocation(ctx context.Context, characterI
 					changed = true
 				}
 			}
+		}
+		if originValid && currentTownPrevVillageApplyOriginStats(character.Stats, origin) {
+			changed = true
 		}
 		if changed {
 			character.UpdatedAt = s.gameplayNow()
