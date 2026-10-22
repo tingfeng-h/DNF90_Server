@@ -34,6 +34,11 @@ func (s *Service) sendCurrentChannelReconnectTownEntry(session *gameSession) err
 			hasCharacter,
 		)
 	}
+	// Keep the pre-commit record: the transition projects the Seria-room
+	// landing into character.Stats, and commit writes that landing back. If the
+	// durable prev_village_* row is missing, this record is the only evidence
+	// of the town the player is switching away from.
+	originCharacter := character
 	character, townID, areaID, row, mapPath, err := s.currentChannelReconnectTownTransition(
 		ctx,
 		session,
@@ -43,7 +48,13 @@ func (s *Service) sendCurrentChannelReconnectTownEntry(session *gameSession) err
 	if err != nil {
 		return fmt.Errorf("load persisted channel reconnect location: %w", err)
 	}
-	character, err = s.commitCurrentReconnectLocation(ctx, characterID, character)
+	// Resolve and bind the room origin before commit, from the pre-commit
+	// record. The bound snapshots feed the first op1375/op1425 after the route.
+	session.townMu.Lock()
+	s.restoreCurrentReconnectSeriaOriginLocked(ctx, session, characterID, originCharacter, mapPath)
+	reconnectSeriaOrigin := session.townPrevVillageSnapshot
+	session.townMu.Unlock()
+	character, err = s.commitCurrentReconnectLocationWithOrigin(ctx, characterID, character, reconnectSeriaOrigin)
 	if err != nil {
 		return fmt.Errorf("commit channel reconnect location: %w", err)
 	}
@@ -76,7 +87,6 @@ func (s *Service) sendCurrentChannelReconnectTownEntry(session *gameSession) err
 	)
 
 	session.townMu.Lock()
-	s.restoreCurrentReconnectSeriaOriginLocked(ctx, session, characterID, character, mapPath)
 	resetCurrentTownPostTransitionPlayerState(session)
 	session.initialTownRouteCharacterID = characterID
 	session.initialTownRouteStage = currentInitialTownRouteArmed
@@ -109,6 +119,12 @@ func (s *Service) sendCurrentChannelReconnectTownEntry(session *gameSession) err
 		"direction", row.Value3,
 		"area_state", row.Value4,
 		"map_path", mapPath,
+		"seria_origin_bound", reconnectSeriaOrigin.PositionValid,
+		"seria_origin_town_id", reconnectSeriaOrigin.TownID,
+		"seria_origin_area_id", reconnectSeriaOrigin.AreaID,
+		"seria_origin_position_x", reconnectSeriaOrigin.PositionX,
+		"seria_origin_position_y", reconnectSeriaOrigin.PositionY,
+		"seria_entry_town_bound", reconnectSeriaOrigin.PositionValid,
 		"sequence", "op376_mode0_light_mode1_op800_full_town_init_op124_op9_op120_op22_op23_op24_op21_op574",
 		"resident_notice_sent", session.currentChannelResidentNoticeSent,
 		"endpoint_policy", endpointPolicy)
