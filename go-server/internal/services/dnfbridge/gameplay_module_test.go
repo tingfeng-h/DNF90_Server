@@ -55,6 +55,8 @@ func TestGameplayModuleRegistryRejectsDuplicateOwnership(t *testing.T) {
 
 func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 	wantNames := []string{
+		"aiken-upgrade",
+		"guild-compound",
 		"guild",
 		"auction",
 		"pvp",
@@ -63,6 +65,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 		"cera-package",
 		"premium-service",
 		"experience-item",
+		"level-up-ticket",
 		"inventory",
 		"skill",
 		"equipment-disjoint",
@@ -90,6 +93,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 		"image-communication",
 		"quest",
 		"dungeon-navigation",
+		"dungeon-ridable",
 		"dungeon-combat-drop",
 		"dungeon-death-revive",
 		"dungeon-settlement-card",
@@ -105,6 +109,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 		"collectbox",
 		"chronicle-refine",
 		"web-viewer",
+		"fiendwar",
 	}
 	if !reflect.DeepEqual(currentGameplayModules.names, wantNames) {
 		t.Fatalf("module names=%v want=%v", currentGameplayModules.names, wantNames)
@@ -126,6 +131,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 	}
 
 	legacyOwners := map[uint16]string{
+		uint16(dnfenum.CmdPacketCompoundGem):                    "guild-compound",
 		uint16(dnfenum.CmdPacketRegenerationRandomOption):       "equipment-regeneration",
 		uint16(dnfenum.CmdPacketCompoundItem):                   "equipment-recipe-compound",
 		uint16(dnfenum.CmdPacketGenCeraticket):                  "web-viewer",
@@ -189,6 +195,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 	}
 
 	upperOwners := map[uint16]string{
+		uint16(dnfenum.CmdPacketCompoundGem):                    "guild-compound",
 		uint16(dnfenum.CmdPacketRegenerationRandomOption):       "equipment-regeneration",
 		uint16(dnfenum.CmdPacketGenCeraticket):                  "web-viewer",
 		uint16(dnfenum.CmdPacketCompoundItem):                   "equipment-recipe-compound",
@@ -237,6 +244,7 @@ func TestCurrentGameplayModulesHaveIndependentRegisteredOwners(t *testing.T) {
 	}
 
 	normalizerOwners := map[uint16]string{
+		uint16(dnfenum.CmdPacketCompoundGem):            "guild-compound",
 		uint16(dnfenum.CmdPacketShopPurchaseCount):      "npc-shop",
 		uint16(dnfenum.CmdPacketMoveItemspace):          "inventory",
 		uint16(dnfenum.CmdPacketChangeSkillslot):        "skill",
