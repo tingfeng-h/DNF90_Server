@@ -22,6 +22,14 @@ func (s *Service) sendSelectCharacterState(session *gameSession, body []byte) er
 		return s.sendCharacterBootstrap(session, "pending_rename_legacy_select_retry")
 	}
 	s.bindGameSessionCharacter(session, charID)
+	// 与 upper 选角入口同口径：切换角色后必须清掉上一条 initial-town 路由。
+	// 否则 initialTownRouteCharacterID / initialTownSkillInfoSent /
+	// initialTownLegacySceneReadyAccepted 还是上个角色（红眼）的状态：
+	//   - 新角色（剑魂）的光剑掌握技能信息不会重新下发；
+	//   - 新场景的第一条 type1345 被当成"已消费"，登录装备容器补发被跳过；
+	//   - 客户端按旧职业/旧装备容器重建，光剑被自动卸下。
+	// 清空后由后续场景流程重新 arm，type1345 再补发 list 3。
+	s.resetCurrentInitialTownRoute(session)
 	if hasCharacter && !s.currentRenameSelectionStillCurrent(ctx, session, selectedCharacter) {
 		return s.handleUpperReturnSelectCharacter(session, nil)
 	}
