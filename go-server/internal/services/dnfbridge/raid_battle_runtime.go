@@ -66,6 +66,7 @@ type runtimeRaidBattle struct {
 	TimedOut             bool
 	RewardCardReady      [2]map[uint16]bool
 	MovieCancelVote      [2]map[uint16]bool
+	MovieDeliveryClaimed [2]bool
 	RewardCards          [2]map[uint16]*currentAntonRewardCard
 	AntonFlowConfig      raid.AntonFlowConfiguration
 	RewardFlow           [2]*currentAntonRewardFlow

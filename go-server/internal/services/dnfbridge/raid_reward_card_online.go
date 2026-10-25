@@ -151,7 +151,8 @@ func (s *Service) handleCurrentAntonMovieCompletion(session *gameSession, op uin
 			}
 		}
 		if !req.Completed {
-			return s.recordRaidMovieCancelVote(session, state, op)
+			// 每次按 ESC 都立刻回确认提示（与原行为一致）；真正终止仍由客户端确认后发 659/1。
+			return s.sendCurrentRaidMovieSkipPrompt(session, state, op)
 		}
 	} else if lukeMovie {
 		if session != nil {
@@ -179,79 +180,21 @@ func (s *Service) handleCurrentAntonMovieCompletion(session *gameSession, op uin
 	if !valid {
 		return s.sendRaidCommandFailure(session, op)
 	}
-	if lukeMovie {
-		o := &session.raidProjection
-		o.mu.Lock()
-		o.movieIdentity = currentRaidProjectionIdentity{InstanceID: state.Battle.InstanceID, Phase: state.Battle.Phase, CharID: session.selectedCharacterID, Generation: session.characterGeneration}
-		o.movieCompleted = true
-		o.mu.Unlock()
-		s.logInfo("dnfbridge raid movie stage", "kind", "game-raid-movie-stage", "char_id", session.selectedCharacterID, "instance_id", state.Battle.InstanceID, "mode", state.Battle.Mode, "phase", state.Battle.Phase, "stage", 1)
-	}
-	if flow := state.Battle.RewardFlow[state.Battle.Phase]; flow != nil && !flow.SquadShownAt.IsZero() {
-		if err := s.sendCurrentAntonRewardPackets(session, state, []currentAntonRewardPacket{{opcode: op, class: 1, body: []byte{1}}}, false); err != nil {
-			return err
+	if raidMovieAllCancelEnabled() && state.Battle != nil && !state.Battle.Single {
+		// 全员就绪才发牌：未齐先不发，等最后一人确认时统一投递给所有成员。
+		if !s.raidMovieAllReadyLocked(session, state) {
+			s.logGameEvent(session, "game-raid-movie-waiting-all",
+				"char_id", session.selectedCharacterID,
+				"instance_id", state.Battle.InstanceID,
+				"phase", state.Battle.Phase)
+			return nil
 		}
-		return s.sendCurrentAntonRewardFlowProjection(session, state)
-	}
-	// Successful reward state4 has stateArgument0 in either phase. Argument1
-	// is reserved for failure and must not be derived from the phase index.
-	packets := []currentAntonRewardPacket{{opcode: op, class: 1, body: []byte{1}}, {opcode: 587, class: 0, body: []byte{4, 0}}}
-	if currentAntonPhaseClearCount(state.Battle, session.selectedCharacterID) < state.Battle.AntonRewards.Phases[state.Battle.Phase].MinimumClears {
-		return s.sendCurrentAntonRewardPackets(session, state, packets, true)
-	}
-	member := state.Members[runtimeRaidMemberIndex(state, session.selectedCharacterID)]
-	peers := state.Members
-	if flow := state.Battle.RewardFlow[state.Battle.Phase]; flow != nil {
-		peers = nil
-		found := false
-		for _, owner := range flow.Recipients {
-			if owner.CharacterID == member.CharID {
-				member.GroupIndex, found = owner.Group, true
-			}
-			peers = append(peers, runtimeRaidMemberState{CharID: owner.CharacterID, GroupIndex: owner.Group})
+		if !s.claimRaidMovieCompletionDeliveryLocked(session, state) {
+			return nil
 		}
-		if !found {
-			return s.sendRaidCommandFailure(session, op)
-		}
+		return s.deliverRaidMovieCompletionToAllMembers(session, state, op)
 	}
-	var cards []raid.RewardDisplayCard
-	lukeFinal := state.Battle.Mode == 2 && state.Battle.Phase == 1 && !state.Battle.Single
-	var visible map[uint16]bool
-	if lukeFinal {
-		visible = s.currentRaidPartyRewardDisplayMembers(session, state)
-	}
-	for _, peer := range peers {
-		include := peer.GroupIndex == member.GroupIndex
-		if lukeFinal {
-			include = visible[peer.CharID]
-		}
-		if include && currentAntonPhaseClearCount(state.Battle, peer.CharID) >= state.Battle.AntonRewards.Phases[state.Battle.Phase].MinimumClears {
-			card := raid.RewardDisplayCard{CharacterID: peer.CharID, CardType: byte(len(cards) + 1)}
-			if selected := state.Battle.RewardCards[state.Battle.Phase][peer.CharID]; selected != nil && selected.Committed {
-				card.CardType = selected.Card
-				card.Items = currentAntonPartyDisplayItems(selected.Plan)
-			}
-			cards = append(cards, card)
-		}
-	}
-	if len(cards) == 0 || len(cards) > 4 {
-		return fmt.Errorf("Anton reward party exceeds native four-card layout")
-	}
-	for _, kind := range []byte{1, 0} {
-		projection := cards
-		if kind == 0 {
-			projection = append([]raid.RewardDisplayCard(nil), cards...)
-			for i := range projection {
-				projection[i].Items = nil
-			}
-		}
-		body, err := raid.BuildRewardListBody(kind, projection)
-		if err != nil {
-			return err
-		}
-		packets = append(packets, currentAntonRewardPacket{opcode: 600, body: body})
-	}
-	return s.sendCurrentAntonRewardPackets(session, state, packets, true)
+	return s.deliverCurrentRaidMovieCompletion(session, state, op)
 }
 
 // All actual normal party_card choices have flag0. Ordinary descriptors use
@@ -481,4 +424,83 @@ func (s *Service) queueCurrentAntonPartyCardReveal(sender *gameSession, state ru
 			}
 		}()
 	}
+}
+
+// deliverCurrentRaidMovieCompletion 是"给单个成员发翻牌"的原逻辑，从
+// handleCurrentAntonMovieCompletion 原样切出（逻辑未改），供"全员就绪后统一投递"复用。
+func (s *Service) deliverCurrentRaidMovieCompletion(session *gameSession, state runtimeRaidState, op uint16) error {
+	lukeMovie := state.Battle != nil && state.Battle.Mode == 2 && !state.Battle.Single
+	if lukeMovie {
+		o := &session.raidProjection
+		o.mu.Lock()
+		o.movieIdentity = currentRaidProjectionIdentity{InstanceID: state.Battle.InstanceID, Phase: state.Battle.Phase, CharID: session.selectedCharacterID, Generation: session.characterGeneration}
+		o.movieCompleted = true
+		o.mu.Unlock()
+		s.logInfo("dnfbridge raid movie stage", "kind", "game-raid-movie-stage", "char_id", session.selectedCharacterID, "instance_id", state.Battle.InstanceID, "mode", state.Battle.Mode, "phase", state.Battle.Phase, "stage", 1)
+	}
+	if flow := state.Battle.RewardFlow[state.Battle.Phase]; flow != nil && !flow.SquadShownAt.IsZero() {
+		if err := s.sendCurrentAntonRewardPackets(session, state, []currentAntonRewardPacket{{opcode: op, class: 1, body: []byte{1}}}, false); err != nil {
+			return err
+		}
+		return s.sendCurrentAntonRewardFlowProjection(session, state)
+	}
+	// Successful reward state4 has stateArgument0 in either phase. Argument1
+	// is reserved for failure and must not be derived from the phase index.
+	packets := []currentAntonRewardPacket{{opcode: op, class: 1, body: []byte{1}}, {opcode: 587, class: 0, body: []byte{4, 0}}}
+	if currentAntonPhaseClearCount(state.Battle, session.selectedCharacterID) < state.Battle.AntonRewards.Phases[state.Battle.Phase].MinimumClears {
+		return s.sendCurrentAntonRewardPackets(session, state, packets, true)
+	}
+	member := state.Members[runtimeRaidMemberIndex(state, session.selectedCharacterID)]
+	peers := state.Members
+	if flow := state.Battle.RewardFlow[state.Battle.Phase]; flow != nil {
+		peers = nil
+		found := false
+		for _, owner := range flow.Recipients {
+			if owner.CharacterID == member.CharID {
+				member.GroupIndex, found = owner.Group, true
+			}
+			peers = append(peers, runtimeRaidMemberState{CharID: owner.CharacterID, GroupIndex: owner.Group})
+		}
+		if !found {
+			return s.sendRaidCommandFailure(session, op)
+		}
+	}
+	var cards []raid.RewardDisplayCard
+	lukeFinal := state.Battle.Mode == 2 && state.Battle.Phase == 1 && !state.Battle.Single
+	var visible map[uint16]bool
+	if lukeFinal {
+		visible = s.currentRaidPartyRewardDisplayMembers(session, state)
+	}
+	for _, peer := range peers {
+		include := peer.GroupIndex == member.GroupIndex
+		if lukeFinal {
+			include = visible[peer.CharID]
+		}
+		if include && currentAntonPhaseClearCount(state.Battle, peer.CharID) >= state.Battle.AntonRewards.Phases[state.Battle.Phase].MinimumClears {
+			card := raid.RewardDisplayCard{CharacterID: peer.CharID, CardType: byte(len(cards) + 1)}
+			if selected := state.Battle.RewardCards[state.Battle.Phase][peer.CharID]; selected != nil && selected.Committed {
+				card.CardType = selected.Card
+				card.Items = currentAntonPartyDisplayItems(selected.Plan)
+			}
+			cards = append(cards, card)
+		}
+	}
+	if len(cards) == 0 || len(cards) > 4 {
+		return fmt.Errorf("Anton reward party exceeds native four-card layout")
+	}
+	for _, kind := range []byte{1, 0} {
+		projection := cards
+		if kind == 0 {
+			projection = append([]raid.RewardDisplayCard(nil), cards...)
+			for i := range projection {
+				projection[i].Items = nil
+			}
+		}
+		body, err := raid.BuildRewardListBody(kind, projection)
+		if err != nil {
+			return err
+		}
+		packets = append(packets, currentAntonRewardPacket{opcode: 600, body: body})
+	}
+	return s.sendCurrentAntonRewardPackets(session, state, packets, true)
 }
