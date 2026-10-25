@@ -151,6 +151,9 @@ func (s *Service) sendCurrentTownPlayerStateLocked(
 	if err := s.sendCurrentRaidChannelReady(session, source+"_selected_raid_town_before_mode1"); err != nil {
 		return err
 	}
+	if err := s.pushCurrentRaidMembershipAfterChannelResync(session, source+"_after_raid_channel_ready"); err != nil {
+		return err
+	}
 	// 同窗口的第二条 init 次数报文：厂商 NOTI 0x0326 `DIMENSION_GATE_ENTRANCE_INFO`
 	// （次元门/魔界裂缝每日进入次数）。厂商把它注册在 `InitPacketBuilderRegistry.cs:106`，
 	// 即 `WeddingInfo` 之后、`StrikerSupportTagCharacter` 之前；我方登录进城序列是一条
