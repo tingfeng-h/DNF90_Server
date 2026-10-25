@@ -141,7 +141,19 @@ func (s *Service) handleCurrentAntonMovieCompletion(session *gameSession, op uin
 		return s.sendRaidCommandFailure(session, op)
 	}
 	lukeMovie := state.Battle != nil && state.Battle.Mode == 2 && !state.Battle.Single
-	if lukeMovie {
+	if raidMovieAllCancelEnabled() && state.Battle != nil && !state.Battle.Single {
+		if session != nil {
+			session.raidProjection.mu.Lock()
+			failed := session.raidProjection.failed
+			session.raidProjection.mu.Unlock()
+			if failed {
+				return fmt.Errorf("raid movie transport previously failed")
+			}
+		}
+		if !req.Completed {
+			return s.recordRaidMovieCancelVote(session, state, op)
+		}
+	} else if lukeMovie {
 		if session != nil {
 			session.raidProjection.mu.Lock()
 			failed := session.raidProjection.failed

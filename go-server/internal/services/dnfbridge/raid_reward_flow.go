@@ -374,7 +374,15 @@ func (s *Service) advanceCurrentAntonRewardFlows(now time.Time, roll func(int64)
 		for _, seconds := range f.Configuration.MovieEndSeconds {
 			movie = max(movie, seconds)
 		}
-		if all && (currentLukePhase0PartyOnlyRewardSettled(f) || !now.Before(f.SquadShownAt.Add(time.Duration(movie)*time.Second))) {
+		// 全员影片均已结束（每个实际成员都发过 659 body=1）⇒ 立即推进，不再多等一个影片时长。
+		movieDone := false
+		if raidMovieAllCancelEnabled() {
+			if live := s.raids[f.RaidKey]; live != nil && live.Battle != nil &&
+				live.Battle.InstanceID == f.InstanceID && live.Battle.Phase == f.Phase {
+				movieDone = raidMovieAllMembersCompletedLocked(live, f.Phase)
+			}
+		}
+		if all && (currentLukePhase0PartyOnlyRewardSettled(f) || movieDone || !now.Before(f.SquadShownAt.Add(time.Duration(movie)*time.Second))) {
 			f.FinishedAt = now
 			if f.Mode != 3 && !f.Single && f.Phase == 0 {
 				f.BreakUntil = now.Add(time.Duration(f.Configuration.PhaseBreakSeconds) * time.Second)
