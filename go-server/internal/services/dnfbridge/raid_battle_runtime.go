@@ -65,7 +65,6 @@ type runtimeRaidBattle struct {
 	PhaseCompletedAt     time.Time
 	TimedOut             bool
 	RewardCardReady      [2]map[uint16]bool
-	MovieCancelVote      [2]map[uint16]bool
 	RewardCards          [2]map[uint16]*currentAntonRewardCard
 	AntonFlowConfig      raid.AntonFlowConfiguration
 	RewardFlow           [2]*currentAntonRewardFlow
@@ -171,10 +170,6 @@ func cloneRuntimeRaidBattle(b *runtimeRaidBattle) *runtimeRaidBattle {
 	}
 	for phase := range b.RewardCards {
 		v.RewardFlow[phase] = cloneCurrentAntonRewardFlow(b.RewardFlow[phase])
-		v.MovieCancelVote[phase] = make(map[uint16]bool, len(b.MovieCancelVote[phase]))
-		for id, voted := range b.MovieCancelVote[phase] {
-			v.MovieCancelVote[phase][id] = voted
-		}
 		v.RewardCardReady[phase] = make(map[uint16]bool, len(b.RewardCardReady[phase]))
 		for id, ready := range b.RewardCardReady[phase] {
 			v.RewardCardReady[phase][id] = ready
