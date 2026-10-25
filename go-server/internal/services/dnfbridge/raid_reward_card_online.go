@@ -141,7 +141,9 @@ func (s *Service) handleCurrentAntonMovieCompletion(session *gameSession, op uin
 		return s.sendRaidCommandFailure(session, op)
 	}
 	lukeMovie := state.Battle != nil && state.Battle.Mode == 2 && !state.Battle.Single
-	if lukeMovie {
+	// 安图恩（mode 1）也走卢克那套"先弹确认框"：见 raid_movie_prompt_anton.go。
+	promptMovie := lukeMovie || (raidMoviePromptAntonEnabled() && state.Battle != nil && state.Battle.Mode == 1 && !state.Battle.Single)
+	if promptMovie {
 		if session != nil {
 			session.raidProjection.mu.Lock()
 			failed := session.raidProjection.failed
