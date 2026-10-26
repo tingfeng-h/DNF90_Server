@@ -155,15 +155,7 @@ func (s *Service) sendDungeonEntryPeerEndpointRemotes(session *gameSession, sour
 		"packet_order", dungeonEntryPacketOrder(true),
 		"vendor_packet_order", dungeonEntryVendorPacketOrder,
 		"reason", "vendor_re_sends_op11_remotes_inside_the_party_dungeon_entry_sequence")
-	if err := s.sendGameUpperRawClassCodec(session, 0x000b, body, 0, true); err != nil {
-		return true, err
-	}
-	// 实验：副本内房间 P2P 表（A21 DungeonRoomP2pBuilder / Noti 0x0184）。
-	// 城镇表 0x0B 与房间表 0x184 是两张不同的表，客户端在副本里认后者。
-	if err := s.sendDungeonRoomP2PTable(session, state, source+"_after_op11_remotes"); err != nil {
-		s.logGameEvent(session, "game-party-dungeon-room-p2p-send-failed", "error", err)
-	}
-	return true, nil
+	return true, s.sendGameUpperRawClassCodec(session, 0x000b, body, 0, true)
 }
 
 // logDungeonEntrySequence 在进场序列的 op28 之后留下一条与厂商同名的事件
