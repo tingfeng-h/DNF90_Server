@@ -357,6 +357,7 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 	if err := s.sendRuntimePartyMemberRemoved(session, sourceID, alignedcmd.PartyState{}); err != nil {
 		return err
 	}
+	s.cleanupPartyLeaveActors(session, previous, sourceID)
 	if result.Retired != nil {
 		s.closeRuntimePartyUDPRelay(int(result.Retired.ID))
 		for _, member := range result.Retired.Members {
