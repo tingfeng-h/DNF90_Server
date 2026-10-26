@@ -1727,29 +1727,10 @@ func ownerAppliedRepairAllResult(opcode uint16, cmd Command, result dnfequip.Rep
 			result.UpdatedGold,
 			result.Changed,
 		),
-		WornEquipmentSlotRefreshes: repairAllWornRefreshSlots(result.RepairedSlots),
 		UpperResponses: []alignedcmd.UpperResponse{
 			class1Response(opcode, buildRepairEquipmentAck(cmd.SourceListType, -1, result.UpdatedGold)),
 		},
 	}
-}
-
-// repairAllWornRefreshSlots 只保留可刷新的穿戴槽位（12..25），并按槽位升序去重。
-func repairAllWornRefreshSlots(slots []int16) []int16 {
-	if len(slots) == 0 {
-		return nil
-	}
-	seen := make(map[int16]bool, len(slots))
-	out := make([]int16, 0, len(slots))
-	for _, slot := range slots {
-		if slot < 12 || slot > 25 || seen[slot] {
-			continue
-		}
-		seen[slot] = true
-		out = append(out, slot)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }
 
 func ownerAppliedEquippedRepairResult(opcode uint16, cmd Command, result dnfequip.RepairResult) alignedcmd.Result {
