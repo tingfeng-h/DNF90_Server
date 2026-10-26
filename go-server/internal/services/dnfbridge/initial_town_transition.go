@@ -17,6 +17,9 @@ func (s *Service) currentInitialTownTransition(
 	if isCurrentFiendWarChannel(session) {
 		return s.currentRaidEntranceTownTransition(session, characterID, character)
 	}
+	if s.isCurrentTagTournamentChannel(session) {
+		return s.currentTagTournamentTownTransition(characterID, character)
+	}
 	if session != nil && isPVPChannel(session.channel) {
 		return s.currentPVPTownTransition(session, characterID, character)
 	}
@@ -29,78 +32,23 @@ func (s *Service) currentChannelReconnectTownTransition(
 	characterID uint16,
 	character dnfrepo.CharacterRecord,
 ) (dnfrepo.CharacterRecord, byte, byte, currentSceneTransitionRow, string, error) {
+	if s.isCurrentTagTournamentChannel(session) {
+		return s.currentTagTournamentTownTransition(characterID, character)
+	}
 	if session != nil && isPVPChannel(session.channel) {
 		return s.currentPVPTownTransition(session, characterID, character)
 	}
 	if session != nil && (session.channel.Type == dnfenum.RaidChannelType || session.channel.Type == dnfenum.HiddenRaidType || session.channel.Type == 42) {
 		return s.currentRaidEntranceTownTransition(session, characterID, character)
 	}
-	if character.Stats["town_id"] == 10 {
-		location, err := s.currentPVPExitLoginLocation(characterID, character)
-		if err != nil {
-			return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", err
-		}
-		return currentReconnectLocationProjection(characterID, character, location)
+	// 所有普通频道入口共用选角色的房间政策，包含从决斗、无双及团本退回。
+	// 入场前的普通位置用于确定所属城镇和房门，不能直接用作街道出生点。
+	if session == nil {
+		return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", fmt.Errorf("普通换线缺少角色会话")
 	}
-	// 超时空及其它专用城镇退出时，优先恢复入场前的有效普通落点。
-	if currentRegisteredChannelTown(character.Stats["town_id"]) {
-		location, err := s.currentRaidExitLoginLocation(characterID, character)
-		if err != nil {
-			return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", err
-		}
-		return currentReconnectLocationProjection(characterID, character, location)
-	}
-	// DNFBRIDGE_RECONNECT_SERIA_ORIGIN=false 时，频道重连不再沿用持久化落点，
-	// 而是走与"选择角色登录"相同的落点解析（城镇自己的赛丽亚房间）。
-	// 默认 true = 逐字节保持旧的持久化落点行为。
-	//
-	// 该开关只决定"落在房间还是落在线下原位"；房间的归属城镇（op1375 世界地图
-	// 上下文 + op1425 下方门）由 DNFBRIDGE_RECONNECT_SERIA_ENTRY_TOWN 独立恢复，
-	// 默认 on。两者分开后，本服现有的 false（要求回房间）不会再顺带丢掉来源城镇，
-	// 进而把共享房间当成艾尔文防线 38/1 并从 38/0 出房。
-	if !envBool(reconnectSeriaOriginEnv, true) {
-		location, _, _, _, err := s.currentCharacterListLoginLocationForSession(session, characterID, character)
-		if err != nil {
-			return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", err
-		}
-		// A channel switch always lands in a Seria room. The shared login
-		// resolver can return a persisted street position when
-		// DNFBRIDGE_LOGIN_PERSISTED_TOWN=keep, or when a town has no room area
-		// of its own; neither is a room. Keep the town's own room when the
-		// resolver found one, otherwise force the shared 38/1 room. This is
-		// what makes the switch behave the same from every town (20/1
-		// 苍穹贵族号 included) instead of returning to the exact spot.
-		if !townMapPathLooksLikeSeria(location.MapPath) {
-			fallback, fallbackErr := s.currentInitialTownSeriaLoginLocation()
-			if fallbackErr != nil {
-				return dnfrepo.CharacterRecord{}, 0, 0, currentSceneTransitionRow{}, "", fallbackErr
-			}
-			fallback.Branch = "channel_reconnect_seria_room"
-			fallback.Source = "channel_reconnect_seria_room_fallback"
-			s.logGameEvent(session, "game-channel-reconnect-seria-room-forced",
-				"char_id", characterID,
-				"resolved_town_id", location.TownID,
-				"resolved_area_id", location.AreaID,
-				"resolved_map_path", location.MapPath,
-				"fallback_town_id", fallback.TownID,
-				"fallback_area_id", fallback.AreaID,
-				"fallback_map_path", fallback.MapPath,
-				"reason", "channel_reconnect_requires_a_seria_room")
-			location = fallback
-		}
-		location.Branch = "channel_reconnect_seria_room"
-		location.Source = "channel_reconnect_login_landing"
-		s.logGameEvent(session, "game-channel-reconnect-seria-location",
-			"char_id", characterID,
-			"town_id", location.TownID,
-			"area_id", location.AreaID,
-			"position_x", location.PositionX,
-			"position_y", location.PositionY,
-			"map_path", location.MapPath,
-			"source", location.Source)
-		return currentReconnectLocationProjection(characterID, character, location)
-	}
-	return s.currentPersistedTownTransition(ctx, session, characterID, character, "channel_reconnect_persisted_location_read_only")
+	session.townMu.Lock()
+	defer session.townMu.Unlock()
+	return s.currentCharacterListLoginTransition(ctx, session, characterID, character)
 }
 
 // Raid channel entry uses the town's Seria room, not its dungeon gate.
