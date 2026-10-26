@@ -377,6 +377,8 @@ func (s *Service) handleGameCommandRequest(session *gameSession, request gamepla
 		return s.handleRepresentAccountNameDuplicateCheck(session, body)
 	case dnfenum.GameType(currentCmdUpdateRepresentAccountName), dnfenum.GameType(currentCmdChangeRepresentAccountName):
 		return s.handleUpdateRepresentAccountName(session, body, typ)
+	case dnfenum.GameType(dnfenum.CmdPacketDecreaseDurability):
+		return s.handleCurrentDecreaseDurability(session, body)
 	case dnfenum.GameType(dnfenum.CmdPacketStoryDigestUpdate):
 		// The current client reaches bodyless op1445 through the legacy game
 		// decoder even when the semantic command is a class-1 upper command.

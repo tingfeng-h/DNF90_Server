@@ -99,6 +99,10 @@ type RepairResult struct {
 	FreeRepair bool
 	// RepairedCount is set by RepairAll: how many entries were restored.
 	RepairedCount int
+	// RepairedSlots 是 RepairAll 实际修好的**穿戴槽位**（list3），供桥接层逐个刷新
+	// op14 行。86JP 只回 0xFFFF ACK 并假设"客户端本地拉满"，现用客户端实测不拉：
+	// 全部修理后要退出副本重选角色才看到，故补这份槽位列表。
+	RepairedSlots []int16
 }
 
 // MoveCommand 描述装备槽和物品栏之间移动的最小命令。
@@ -548,6 +552,7 @@ func (o *Owner) repairAllInTransaction(
 			}
 			entry.Extra["durability"] = strconv.FormatInt(target.maxDura, 10)
 			equipRecord.Entries[target.key] = entry
+			result.RepairedSlots = append(result.RepairedSlots, target.slot)
 			continue
 		}
 		stack := invRecord.Slots[target.key]
