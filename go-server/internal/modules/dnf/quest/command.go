@@ -24,6 +24,9 @@ type Command struct {
 	HasRewardSelect     bool
 	Multiplier          uint16
 	NeedsOwner          string
+	// SkipGiveUpAssetCheck 由桥接层按 DNFBRIDGE_QUEST_GIVEUP_ALLOW_ASSETS 设置：
+	// 跳过"放弃任务要求物品回收"的预检（任务物品留在背包，只移除任务状态）。
+	SkipGiveUpAssetCheck bool
 }
 
 // NewQuestIDCommand 构造只携带 questId 的接受/放弃任务计划。

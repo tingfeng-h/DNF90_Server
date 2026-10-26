@@ -104,10 +104,15 @@ func (s *Service) handleCurrentGiveUpQuest(session *gameSession, body []byte) er
 	if err != nil {
 		return fmt.Errorf("create quest give-up owner: %w", err)
 	}
-	result, err := owner.ApplyGiveUpWithMaterialResolver(ctx, catalog, dnfquest.NewQuestIDCommand(alignedcmd.Request{
+	giveUpCommand := dnfquest.NewQuestIDCommand(alignedcmd.Request{
 		AccountID:           s.accountIDForSession(session),
 		SelectedCharacterID: session.selectedCharacterID,
-	}, "giveup_quest", request), func(itemID int64) (bool, error) {
+	}, "giveup_quest", request)
+	// 现场（2026-10-26）：持有任务物品的任务（深渊派对 Ep3-能源中心 4539）原先
+	// 直接返回 "quest give-up requires an inventory transaction"，玩家放不掉任务。
+	// 打开开关后跳过该预检：只移除任务状态，任务物品留在背包由玩家自理。
+	giveUpCommand.SkipGiveUpAssetCheck = questGiveUpAllowAssets()
+	result, err := owner.ApplyGiveUpWithMaterialResolver(ctx, catalog, giveUpCommand, func(itemID int64) (bool, error) {
 		if itemID <= 0 || itemID > math.MaxUint32 {
 			return false, nil
 		}

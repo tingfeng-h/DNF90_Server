@@ -308,7 +308,10 @@ func (o *Owner) ApplyGiveUpWithMaterialResolver(ctx context.Context, catalog *Ca
 	if definition.CantGiveUp {
 		return GiveUpResult{}, ErrQuestCannotGiveUp
 	}
-	if questGiveUpNeedsAssetTransaction(definition) {
+	// 现场（2026-10-26）：深渊派对 Ep3-能源中心（quest 4539）持有任务物品，
+	// 原实现要求"放弃时一并回收物品"，于是整条拒绝（客户端表现为无法放弃）。
+	// 开关打开时跳过该预检：只移除任务状态，物品留在背包。
+	if !cmd.SkipGiveUpAssetCheck && questGiveUpNeedsAssetTransaction(definition) {
 		if !giveUpCanRetainOrdinaryMaterials(definition, ordinaryMaterial) {
 			return GiveUpResult{}, ErrGiveUpNeedsAssets
 		}
