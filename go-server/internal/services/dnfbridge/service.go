@@ -54,10 +54,14 @@ type Service struct {
 	guildContributionCatalog     *dnfguild.ContributionCatalog     // guarded by guildDungeonCatalogMu
 	guildHongbaoCatalog          *dnfguild.HongbaoCatalog          // guarded by guildDungeonCatalogMu
 	guildMerchantPurchaseCatalog *dnfguild.MerchantPurchaseCatalog // guarded by guildDungeonCatalogMu
+	guildPlacementCatalog        *guildPlacementCatalog            // guarded by guildDungeonCatalogMu
 	guildCreateMu                sync.Mutex
 	guildTeleportMu              sync.Mutex
 	channelHandoffMu             sync.Mutex
 	channelHandoffs              map[currentAuthenticatedChannelHandoffKey]*currentAuthenticatedChannelHandoff
+	// Protected by mu; released only after session cleanup and event-loop stop.
+	accountEditAdmissions   map[*gameSession]map[string]bool
+	characterEditAdmissions map[*gameSession]map[uint16]string
 	// Serializes warehouse ACKs and snapshots; never acquire while holding an
 	// actor reservation. A snapshot must not overtake its transfer's ACK.
 	guildCargoMu     sync.Mutex
@@ -408,7 +412,9 @@ func (s *Service) Start(ctx context.Context) error {
 			s.mu.Unlock()
 			return errors.Join(err, closeErr)
 		}
+		s.releaseStartupPVFStageCaches()
 	}
+	s.releaseStartupPVFReadCaches()
 	gamePorts := s.gameListenPorts(catalog)
 	if len(gamePorts) == 0 {
 		cancel()
@@ -986,6 +992,7 @@ func (s *Service) logPacketEvent(kind string, args ...any) {
 	if logger == nil {
 		s.logDungeonSettlementDiagnostic(kind, args...)
 		s.logCrossSceneProfileDiagnostic(kind, args...)
+		s.logRaidPeerDiagnostic(kind, args...)
 	}
 	logger.Event(kind, args...)
 }
