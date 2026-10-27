@@ -65,6 +65,7 @@ docker logs --since 2m <server容器> | grep -c level=ERROR   # 应为 0
 | `DNFBRIDGE_PARTY_DUNGEON_PEER_POSITION` | 组队进图后队友"一移动就消失" | `off` |
 | `DNFBRIDGE_PARTY_DUNGEON_PEER_ACTOR_PRE_REMOVE` | 预删除会连带清掉血条 | `off` |
 | `DNFBRIDGE_PARTY_UDP_RELAY_DATAGRAM_TRACE` | UDP 抓包日志（量大） | `off` |
+| 活动 **2365 竞技大赛（马战竞猜）** | 上游警告：该活动可能导致客户端闪退 | **保持关闭** |
 
 ## 已知未修
 
