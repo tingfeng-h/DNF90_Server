@@ -162,6 +162,11 @@ func (s *Service) sendCurrentPreDungeonContextPlayerState(session *gameSession, 
 	if session.selectedCharacterID == 0 {
 		return fmt.Errorf("pre-dungeon-context player state requires selected character")
 	}
+	if partyEntryBatchActorsEnabled() && s.options.currentClientVersion == "official-24.9" {
+		if _, indexed := runtimePartyMemberIndexForSession(session); indexed {
+			return s.sendCurrentPartyEntryActorBinding(session, source)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), createWriteTimeout)
 	defer cancel()
