@@ -21,6 +21,8 @@ import (
 )
 
 type gameSession struct {
+	friendChatLinkMu sync.Mutex
+	friendChatLinks  map[characterFriendChatLinkKey]characterFriendChatLink
 	peerProfileSubscription             currentPeerProfileSubscription // protected by Service.mu
 	professionChangeMu                  sync.Mutex
 	professionChangePending             *currentProfessionChangePending

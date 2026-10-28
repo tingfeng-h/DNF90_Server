@@ -156,6 +156,11 @@ func (s *Service) handleCurrentPeerChat(session *gameSession, typ uint16, body [
 	if len(request.Message) == 0 {
 		return nil
 	}
+	if s.options.currentClientVersion == "official-24.9" && whisperNativeEnabled() {
+		// 支线客户端的私聊不带可校验的 server_group 尾字节；native 档直接投递，
+		// 只保留身份/会话校验，跳过分组一致性门。
+		return s.sendCurrentOfficialWhisper(session, targetSession, typ, request, source, target)
+	}
 	if s.options.currentClientVersion == "official-24.9" {
 		// V179 348F607 reads actor+3AC (character server group), and 348F6F7
 		// writes the conversation's same group, not an owner-channel byte.

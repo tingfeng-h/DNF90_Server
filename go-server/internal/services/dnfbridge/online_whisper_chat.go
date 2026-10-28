@@ -32,6 +32,9 @@ func buildCurrentOfficialWhisperBody(group byte, sender, peer string, message []
 
 func (s *Service) sendCurrentOfficialWhisper(sourceSession, targetSession *gameSession, opcode uint16,
 	request currentPeerChatRequest, source, target dnfrepo.CharacterRecord) error {
+	if whisperNativeEnabled() {
+		return s.sendCurrentOfficialWhisperNative(sourceSession, targetSession, opcode, request, source, target)
+	}
 	if !isCurrentPrivateWhisperType(request.MessageType) || len(request.Message) > 255 || bytes.IndexByte(request.Message, 0) >= 0 {
 		return s.sendGameUpperFailure(sourceSession, opcode, 1)
 	}
