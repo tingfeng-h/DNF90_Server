@@ -84,7 +84,7 @@ func (s *Service) commitCurrentEmblemCompound(ctx context.Context, session *game
 	if s == nil || session == nil || session.selectedCharacterID == 0 || catalog == nil || catalog.source == nil {
 		return currentDisjointResult{}, errCurrentDisjointUnavailable
 	}
-	config, err := s.cachedCurrentDisjointPVFConfig(catalog.source)
+	config, err := catalog.currentDisjointPVFConfig()
 	if err != nil {
 		return currentDisjointResult{}, err
 	}

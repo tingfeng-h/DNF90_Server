@@ -59,7 +59,7 @@ func (s *Service) commitCurrentAvatarDisjoint(ctx context.Context, session *game
 	if s == nil || session == nil || catalog == nil {
 		return errCurrentDisjointUnavailable
 	}
-	config, err := s.cachedCurrentDisjointPVFConfig(catalog.source)
+	config, err := catalog.currentDisjointPVFConfig()
 	if err != nil {
 		return err
 	}
