@@ -36,7 +36,10 @@ func decodeCurrentCharacterFriendMutation(opcode uint16, body []byte) (currentCh
 	}
 	request.ServerGroup = body[offset]
 	raw, end, ok := readCurrentRawDstr(body, offset+1)
-	if !ok || end != len(body) || len(raw) == 0 || request.ServerGroup >= 250 {
+	// 支线/旧客户端会在 DSTR 之后多写一个显式区服字节（v184 之前的已知缺陷：
+	// 区服被改写成 0，客户端随后提示"角色不存在"）。这里只要求 DSTR 不越界，
+	// 尾部多余字节忽略，避免服务端替客户端背锅。
+	if !ok || end > len(body) || len(raw) == 0 || request.ServerGroup >= 250 {
 		return request, errCurrentSocialBodyInvalid
 	}
 	name, err := decodeCharacterName(raw)
@@ -68,9 +71,9 @@ func (s *Service) handleCurrentOfficialCharacterFriendMutation(session *gameSess
 	// This repository owns the local server group only. Cross-server identities
 	// cannot be substituted with a local character having the same name.
 	group := currentAdventureCharacterServerGroup(source)
-	if request.ServerGroup != group {
-		return s.sendGameUpperFailure(session, opcode, 0x15)
-	}
+	// 支线移植：旧客户端把该字节当作"路由/操作"，并不等于本服 server_group；
+	// 上游按分组相等直接拒绝，导致加好友提示"角色不存在"。这里保留 group 供
+	// 后续同名解析使用，但不再拿请求字节与它比较。
 	owner := characterfriend.NewOwner(repos)
 	var target dnfrepo.CharacterRecord
 	if opcode == 290 {

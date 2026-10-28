@@ -302,6 +302,7 @@ func (s *Service) disbandRuntimePartyOnDungeonLeaderExit(
 		// The local kind3 roster must consume its previous manager slots
 		// before NOTI6 removes the departed leader from the active map.
 		if peerRemovalAlreadySent {
+			s.sendDungeonPartyHostTransferToSurvivors(instance, leaderID, source+"_host_transfer")
 			if err := s.sendDungeonDepartedActorRemoval(memberSession, leaderID, source); err != nil {
 				s.logGameEvent(memberSession, "game-dungeon-departed-active-actor-remove-failed", "source", source, "departing_char_id", leaderID, "error", err)
 			}

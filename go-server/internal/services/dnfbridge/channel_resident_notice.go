@@ -195,5 +195,12 @@ func (s *Service) sendCurrentChannelResidentNotice(session *gameSession, now tim
 		return err
 	}
 	session.currentChannelResidentNoticeSent = true
+	// 换频道/重进频道后补推进角色好友列表：客户端会按当前频道上下文重读好友行，
+	// 只在登录时投影过一次的话，切频道后好友会"消失"。
+	if err := s.sendCurrentCharacterFriendList(session, "channel_resident_notice"); err != nil {
+		s.logGameEvent(session, "game-character-friend-channel-refresh-failed", "error", err)
+	}
+	// 同时通知观察者：我的在线位置变了，请重投影他们的好友行。
+	s.refreshCurrentCharacterFriendPresence(selectedCharacterID(session), "channel_changed")
 	return nil
 }

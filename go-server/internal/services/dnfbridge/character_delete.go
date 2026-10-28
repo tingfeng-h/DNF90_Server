@@ -24,6 +24,7 @@
 package dnfbridge
 
 import (
+	"strconv"
 	"bytes"
 	"context"
 	"errors"
@@ -209,6 +210,11 @@ func (s *Service) softDeleteGameCharacter(
 	if err := dnfrepo.SaveCharacterFields(ctx, repos.Character, updated,
 		dnfrepo.CharacterFieldBase, dnfrepo.CharacterFieldStats); err != nil {
 		return previousSlot, tombstoneSlot, err
+	}
+	// 支线移植：删除提交后重投影好友身份，避免观察者仍看到已删除角色。
+	if refreshErr := s.refreshCurrentFriendLifecycle(strconv.Itoa(characterID), "character_deleted"); refreshErr != nil {
+		s.logInfo("dnfbridge friend lifecycle refresh failed", "kind", "game-friend-lifecycle-refresh-failed",
+			"source", "character_deleted", "char_id", characterID, "error", refreshErr)
 	}
 	return previousSlot, tombstoneSlot, nil
 }
