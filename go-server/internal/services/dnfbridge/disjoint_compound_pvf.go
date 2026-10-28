@@ -10,17 +10,21 @@ import (
 	dnfpvf "longheng.io/server/internal/modules/dnf/pvf"
 )
 
-// cachedCurrentDisjointPVFConfig 只解析一次静态 PVF 配置。生产环境 PVF 在启动时
-// 加载、运行期不变；这样每次 op26 不再重新解析 etc/disjoint.etc 和
-// etc/avatardisjoint/*，分解批量/逐件请求的 CPU 与 GC 都会明显下降。
-func (s *Service) cachedCurrentDisjointPVFConfig(source dnfpvf.Source) (currentDisjointPVFConfig, error) {
-	if s == nil {
+// 返回的规则只读；随机产物和物品校验仍在每次操作中计算。
+func (c *pvfDungeonDropCatalog) currentDisjointPVFConfig() (currentDisjointPVFConfig, error) {
+	if c == nil {
 		return currentDisjointPVFConfig{}, errCurrentDisjointUnavailable
 	}
-	s.disjointConfigOnce.Do(func() {
-		s.disjointConfig, s.disjointConfigErr = loadCurrentDisjointPVFConfig(source)
-	})
-	return s.disjointConfig, s.disjointConfigErr
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.disjointConfig != nil {
+		return *c.disjointConfig, nil
+	}
+	config, err := loadCurrentDisjointPVFConfig(c.source)
+	if err == nil {
+		c.disjointConfig = &config
+	}
+	return config, err
 }
 
 func loadCurrentDisjointPVFConfig(source dnfpvf.Source) (currentDisjointPVFConfig, error) {
