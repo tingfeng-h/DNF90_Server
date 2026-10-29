@@ -1127,7 +1127,19 @@ func currentDungeonCommittedDropReceiptsFiltered(
 			continue
 		}
 		if drop.DestinationSlot == 0 {
-			return nil, nil, nil, errCurrentDungeonSettlementStateInvalid
+			// 这条掉落在本角色背包里没有落点（典型：队友的掉落被 legacy 档
+			// 收进共享账本）。它不能算本角色的收据，但**绝不能因此让整个
+			// 结算计划失败**——那样会既不翻牌也出不了本。
+			foreign = append(foreign, currentDungeonSettlementForeignDropReceipt{
+				ObjectKey:           drop.ObjectKey,
+				SceneSlot:           drop.SceneSlot,
+				ItemID:              drop.Item.ItemID,
+				DestinationSlot:     drop.DestinationSlot,
+				StackCount:          drop.Amount,
+				OwnerActorObjectKey: drop.OwnerActorObjectKey,
+				Room:                drop.Room,
+			})
+			continue
 		}
 		// 账号级史诗碎片：`destination_slot` 是哨兵、物品在账号账本里，**不进背包**。
 		if exemptAccountLedgerDrops && drop.DestinationSlot == currentEpicPiecePickupEffectSlot {
