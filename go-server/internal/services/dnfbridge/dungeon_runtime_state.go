@@ -36,7 +36,6 @@ var (
 )
 
 type runtimeDungeonState struct {
-	actionObjects *runtimeDungeonActionObjectState
 	guildPractice                *currentGuildPracticeRun
 	guildDungeonClear            *dnfdungeon.GuildDungeonClear
 	settlementGuildDungeonSent   bool
