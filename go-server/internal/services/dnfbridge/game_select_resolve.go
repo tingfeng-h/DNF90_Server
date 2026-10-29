@@ -123,6 +123,13 @@ func selectCharacterRecord(
 			}
 		}
 	}
+	// 频道切换后的重连：客户端还没拿过角色列表（sentRoster 为空），它发的
+	// slot 是列表里的界面序号，而不是记录槽位。按有序角色表兜底，
+	// 否则选角被拒 → 客户端停在"连接服务器中"黑屏。
+	if parsed.source == "legacy_slot_or_char_id" && len(sentRoster) == 0 &&
+		parsed.slot >= 0 && parsed.slot < len(characters) {
+		return characters[parsed.slot], "roster_index_fallback", true
+	}
 	if parsed.source == "legacy_slot_or_char_id" && parsed.charID != 0 {
 		for _, character := range characters {
 			if numericCharacterID(character) == int(parsed.charID) {
