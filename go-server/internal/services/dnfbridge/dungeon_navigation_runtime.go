@@ -1911,6 +1911,24 @@ func (s *Service) handleDungeonMoveRequestLocked(
 		return nil
 	}
 	targetSnapshot := plan.TargetRoom.Snapshot()
+	// 临时诊断：把目标房间实际携带的 actor 列出来，用于定位普通火山 BOSS 房
+	// 缺失金/血/风/土四个机制怪的问题。
+	{
+		ids := make([]int64, 0, len(targetSnapshot.Monsters))
+		for _, m := range targetSnapshot.Monsters {
+			ids = append(ids, int64(m.Definition.ID))
+		}
+		ext := make([]int64, 0, len(targetSnapshot.ExtendedActors))
+		for _, a := range targetSnapshot.ExtendedActors {
+			ext = append(ext, int64(a.ObjectKey))
+		}
+		s.logGameEvent(session, "game-dungeon-start-map-actors",
+			"dungeon_id", runtime.Dungeon.ID,
+			"room", plan.Target.Coordinate.String(),
+			"monsters", ids, "extended", ext,
+			"monster_count", len(targetSnapshot.Monsters),
+			"extended_count", len(targetSnapshot.ExtendedActors))
+	}
 	packetActorCount := len(targetSnapshot.Monsters) + len(targetSnapshot.ExtendedActors)
 	if plan.PayloadMode == currentDungeonStartMapPayloadCached {
 		packetActorCount = 0
