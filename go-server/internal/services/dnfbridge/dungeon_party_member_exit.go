@@ -207,6 +207,18 @@ func (s *Service) sendMemberGiveupSurvivorRosterAfterDeparture(state alignedcmd.
 		if rosterErr == nil && selfSent && departingID != 0 {
 			errs = errors.Join(errs, s.sendDungeonDepartedActorRemoval(receiver, departingID, "member_giveup_confirmed_town"))
 		}
+		// 三/四人局队伍要继续存在，不能整队销毁；但退队者本人那一行
+		// 在**两套上下文**（城镇 owner=10、副本 owner=0）都要按人清掉，
+		// 否则图里的队伍框会一直留着他的血条。
+		if departingID != 0 {
+			retired := []alignedcmd.PartyMemberState{{UserID: departingID}}
+			if err := s.clearDungeonSurvivorTownPartyRecords(receiver, retired, "member_giveup_network_roster_retired"); err != nil {
+				errs = errors.Join(errs, err)
+			}
+			if err := s.clearDisbandedDungeonPartyRecords(receiver, retired, 0, false, "member_giveup_network_roster_retired"); err != nil {
+				errs = errors.Join(errs, err)
+			}
+		}
 		errs = errors.Join(errs, s.sendGameUpperRawClassCodec(receiver, 0x0099, runtimePartyRealtimeInfoBody(state), 0, true))
 	}
 	return errs

@@ -113,11 +113,15 @@ const townCopresenceReceiverPartyFrameEnv = "DNFBRIDGE_TOWN_COPRESENCE_RECEIVER_
 
 // readTownCopresenceReceiverPartyFrame 默认 on（修好后的行为）；显式 off/0/false/no 回退。
 func readTownCopresenceReceiverPartyFrame(value string) bool {
+	// 2026-10-31 回退默认档：改成"发收包者自己的队伍状态"后，收包者在队伍里、
+	// 被投影的人不在队伍里时会触发 "missing projected actor in party"，
+	// 城镇同屏整条失败（现象：站街看不到对方，进一次房间再出来才恢复）。
+	// 默认维持原行为（发被投影 actor 的状态），只有显式开启才走新档。
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "off", "0", "false", "no":
-		return false
-	default:
+	case "on", "1", "true", "yes":
 		return true
+	default:
+		return false
 	}
 }
 

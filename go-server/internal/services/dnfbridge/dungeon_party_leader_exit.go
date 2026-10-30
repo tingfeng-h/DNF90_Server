@@ -66,36 +66,54 @@ import (
 const dungeonPartyLeaderExitEnv = "DNFBRIDGE_PARTY_DUNGEON_LEADER_EXIT"
 
 const (
-	dungeonPartyLeaderExitValueDisband = "disband"
-	dungeonPartyLeaderExitValueLegacy  = "legacy"
+	dungeonPartyLeaderExitValueRecreate = "recreate"
+	dungeonPartyLeaderExitValueTransfer = "transfer"
+	dungeonPartyLeaderExitValueDisband  = "disband"
+	dungeonPartyLeaderExitValueLegacy   = "legacy"
 )
 
 // dungeonPartyLeaderExitMode 是 dungeonPartyLeaderExitEnv 的归一化取值。
 type dungeonPartyLeaderExitMode int
 
 const (
-	// dungeonPartyLeaderExitDisband 是默认档（零值）= 修好后的行为。
-	dungeonPartyLeaderExitDisband dungeonPartyLeaderExitMode = iota
+	// dungeonPartyLeaderExitTransfer 是默认档（零值）= DNF 官方语义：
+	// 队长退图时把队长位转给槽位最靠前的剩余成员，队伍不解散。
+	dungeonPartyLeaderExitTransfer dungeonPartyLeaderExitMode = iota
+	// dungeonPartyLeaderExitDisband 是旧行为：队长退图就解散全队。
+	dungeonPartyLeaderExitDisband
 	// dungeonPartyLeaderExitLegacy 是改动前行为，一键回退档。
 	dungeonPartyLeaderExitLegacy
+	// dungeonPartyLeaderExitRecreate 是默认档：解散后用幸存者重建新队伍。
+	dungeonPartyLeaderExitRecreate
 )
 
 func (mode dungeonPartyLeaderExitMode) String() string {
-	if mode == dungeonPartyLeaderExitLegacy {
+	switch mode {
+	case dungeonPartyLeaderExitLegacy:
 		return dungeonPartyLeaderExitValueLegacy
+	case dungeonPartyLeaderExitDisband:
+		return dungeonPartyLeaderExitValueDisband
+	case dungeonPartyLeaderExitTransfer:
+		return dungeonPartyLeaderExitValueTransfer
+	default:
+		return dungeonPartyLeaderExitValueRecreate
 	}
-	return dungeonPartyLeaderExitValueDisband
 }
 
 // readDungeonPartyLeaderExitMode 解析 DNFBRIDGE_PARTY_DUNGEON_LEADER_EXIT。
-// **默认 `disband`（= 修好后的行为）**：空/未设置/非法值都是 disband；
-// 只有显式 `legacy` 回到改动前那条"只摘自己、队伍原封不动"的路径。
+// **默认 `transfer`（= DNF 官方语义）**：空/未设置/非法值都是转移队长；
+// `disband` 回到旧行为（队长退图就解散）；`legacy` 回到改动前那条
+// "只摘自己、队伍原封不动" 的路径。
 func readDungeonPartyLeaderExitMode(value string) dungeonPartyLeaderExitMode {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case dungeonPartyLeaderExitValueLegacy:
 		return dungeonPartyLeaderExitLegacy
-	default:
+	case dungeonPartyLeaderExitValueDisband:
 		return dungeonPartyLeaderExitDisband
+	case dungeonPartyLeaderExitValueTransfer:
+		return dungeonPartyLeaderExitTransfer
+	default:
+		return dungeonPartyLeaderExitRecreate
 	}
 }
 
@@ -175,6 +193,19 @@ func (s *Service) disbandRuntimePartyOnDungeonLeaderExit(
 	leaderID := state.UserID
 	if leaderID == 0 || leaderID != leavingCharacterID {
 		return 0
+	}
+	// 默认档：先尝试把队长位转给剩余成员里槽位最靠前的一位；
+	// 转移不成功（比如新队长会话已断开）才回退到解散。
+	switch s.dungeonPartyLeaderExitDisbandMode() {
+	case dungeonPartyLeaderExitRecreate:
+		if sent, ok := s.recreateRuntimePartyOnDungeonLeaderExit(session, instance, leavingCharacterID, source); ok {
+			return sent
+		}
+		fallthrough
+	case dungeonPartyLeaderExitTransfer:
+		if sent, transferred := s.transferRuntimePartyOnDungeonLeaderExit(session, instance, leavingCharacterID, source); transferred {
+			return sent
+		}
 	}
 	inDungeon := dungeonPartyInstanceMemberSessions(instance, leavingCharacterID)
 	// 2026-10-30：不再因"没人留在副本里"提前返回。
