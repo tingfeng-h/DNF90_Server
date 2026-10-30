@@ -100,6 +100,31 @@ func (s *Service) townCopresenceActorPartyState(session *gameSession) alignedcmd
 // 不同队时照旧发送（那条路径正是这条包存在的理由），receiver 与 actor 同角色时也照发。
 const townCopresenceSkipSamePartyFrameEnv = "DNFBRIDGE_TOWN_COPRESENCE_SKIP_SAME_PARTY_FRAME"
 
+// townCopresenceReceiverPartyFrameEnv 决定城镇同屏那条 op9 发谁的队伍状态。
+//
+// 这条 op9 的实际语义是"收包者自己的队伍 HUD"。默认（on）发**收包者**的权威队伍状态：
+//   - 收包者不在任何队伍 → 空状态 → kind3 销毁帧，清掉残留成员行/血条；
+//   - 收包者在队伍里 → 重发他自己的名册（幂等）。
+//
+// 旧行为（off）发的是**被投影 actor** 的队伍状态：陌生人或已退队的旧队友只要自己
+// 还有队伍，就会把那支队伍的名单塞进收包者界面，留下清不掉的残留血条，
+// 并让 party_id 在再次进团本时被重新投影（超时空二次进图卡住）。
+const townCopresenceReceiverPartyFrameEnv = "DNFBRIDGE_TOWN_COPRESENCE_RECEIVER_PARTY_FRAME"
+
+// readTownCopresenceReceiverPartyFrame 默认 on（修好后的行为）；显式 off/0/false/no 回退。
+func readTownCopresenceReceiverPartyFrame(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "off", "0", "false", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+func townCopresenceReceiverPartyFrameEnabled() bool {
+	return readTownCopresenceReceiverPartyFrame(os.Getenv(townCopresenceReceiverPartyFrameEnv))
+}
+
 func townCopresenceSkipSamePartyFrameEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(townCopresenceSkipSamePartyFrameEnv))) {
 	case "on", "1", "true", "yes", "skip":

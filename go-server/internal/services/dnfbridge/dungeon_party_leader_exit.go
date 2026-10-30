@@ -177,11 +177,12 @@ func (s *Service) disbandRuntimePartyOnDungeonLeaderExit(
 		return 0
 	}
 	inDungeon := dungeonPartyInstanceMemberSessions(instance, leavingCharacterID)
-	if len(inDungeon) == 0 {
-		// 没有队友还留在本场实例里（例如全队一起回城、或实例已被回收）：
-		// 不改变今天的任何行为。
-		return 0
-	}
+	// 2026-10-30：不再因"没人留在副本里"提前返回。
+	//  队长退图时另一人已经在城镇里（或已退队），队伍就剩队长 1 人，
+	//  以前这里直接 return：队伍不解散、也不发销毁帧，客户端就留下一条
+	//  没有归属的成员行，直到玩家手动退队才消失（"u8c01u5148u9000u5c31u6709残u7559"）。
+	//  单人队伍本身就不应存在，这里照常解散并发销毁帧；
+	//  若真的没有其他成员，inDungeon/online 两个循环自然为空。
 
 	// 1. 解散：每个成员都摘掉。**先摘非队长、最后摘队长**：管理器里"队长离队且队里还有人"
 	// 会走"退役这一代 + 用新 id 重建"的分支（runtime_manager.go:271-306），那会白白多出
@@ -288,6 +289,16 @@ func (s *Service) disbandRuntimePartyOnDungeonLeaderExit(
 		if err := s.clearDisbandedDungeonPartyRecords(memberSession, members, leaderID, peerRemovalAlreadySent, source); err != nil {
 			s.logGameEvent(memberSession, "game-party-dungeon-retired-record-clear-failed", "source", source, "party_id", state.PartyID, "error", err)
 			continue
+		}
+		// 队长退图解散时，队长本人和留图队员都被摘掉，
+		// 两边都需要那条原生的退队 ACK 才会拆掉队伍界面。
+		if err := s.sendDungeonExitPartyLeaveAck(memberSession, "leader_exit_disband"); err != nil {
+			s.logGameEvent(memberSession, "game-party-dungeon-leader-exit-leave-ack-failed",
+				"source", source, "char_id", memberSession.selectedCharacterID, "error", err)
+		}
+		if err := s.sendDungeonExitSelfFrameClear(memberSession, source+"_member_self"); err != nil {
+			s.logGameEvent(memberSession, "game-party-dungeon-leader-exit-frame-clear-failed",
+				"source", source, "char_id", memberSession.selectedCharacterID, "error", err)
 		}
 		if err := s.sendRuntimePartyMemberRemoved(memberSession, leaderID, alignedcmd.PartyState{}); err != nil {
 			s.logGameEvent(memberSession, "game-party-dungeon-leader-exit-roster-clear-failed",

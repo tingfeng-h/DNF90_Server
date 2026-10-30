@@ -72,6 +72,28 @@ func (s *Service) leaveRuntimePartyOnMemberGiveup(session *gameSession, instance
 	} else {
 		s.syncRuntimePartyUDPRelay(next)
 	}
+	// 踢人（walkout）路径会给包括被踢者在内的所有成员发一条
+	// "某槽位已离队"的 op7 通知，客户端认这条才会把那一行从队伍界面拆掉；
+	// 退图路径以前只发名册销毁帧。这里按踢人路径补上。
+	if beforeMembers := runtimePartyMembers(before.StateFor(before.Leader)); len(beforeMembers) > 0 {
+		for _, member := range beforeMembers {
+			if member.UserID != identity.character {
+				continue
+			}
+			if err := s.broadcastRuntimePartyWalkoutNotice(before.StateFor(before.Leader), member.Slot, 0); err != nil {
+				s.logGameEvent(session, "game-party-dungeon-exit-walkout-notice-failed",
+					"source", "member_giveup_confirmed_town", "char_id", identity.character, "slot", member.Slot, "error", err)
+			} else {
+				s.logGameEvent(session, "game-party-dungeon-exit-walkout-notice",
+					"source", "member_giveup_confirmed_town", "char_id", identity.character, "slot", member.Slot,
+					"members", len(beforeMembers))
+			}
+			break
+		}
+	}
+	// 退图退队也要发同一条退队 ACK，否则客户端不会拆掉自己的队伍界面。
+	errs = errors.Join(errs, s.sendDungeonExitPartyLeaveAck(session, "member_giveup_confirmed_town"))
+	errs = errors.Join(errs, s.sendDungeonExitSelfFrameClear(session, "member_giveup_confirmed_town"))
 	errs = errors.Join(errs, s.sendRuntimePartyMemberRemoved(session, identity.character, alignedcmd.PartyState{}))
 	if s.options.currentClientVersion == "official-24.9" {
 		errs = errors.Join(errs, s.sendMemberGiveupSurvivorRosterAfterDeparture(next, instance, identity.character))
@@ -131,7 +153,25 @@ func (s *Service) sendMemberGiveupSurvivorRosterAfterDeparture(state alignedcmd.
 				errs = errors.Join(errs, err)
 				continue
 			}
-			errs = errors.Join(errs, s.sendGameUpperRawClassCodec(receiver, 0x0099, runtimePartyRealtimeInfoBody(alignedcmd.PartyState{}), 0, true))
+			// 队伍只剩 1 人：服务端也必须把这条队伍解散掉。只发空 op153 不清 op9，
+			// 客户端会留下一条没有归属的成员行（城镇/副本里都能看到那条残留血条）；
+			// party_id 继续存在还会在城镇同屏和再次进团本时被投影回来，
+			// 超时空二次进图就会卡在选图/加载。先解散管理器里的队伍，再发
+			// 空名册（kind3 销毁）+ 空 op153 + 清 actor 投影。
+			if manager := s.runtimePartyManagerForService(); manager != nil {
+				if result := manager.LeaveCurrent(identity.character); result.OK {
+					s.logGameEvent(receiver, "game-party-single-survivor-disbanded",
+						"char_id", identity.character,
+						"departing_char_id", departingID,
+						"party_id", state.PartyID,
+						"disbanded", result.Disbanded,
+						"reason", "a_one_member_party_must_not_survive_the_departure")
+				}
+			}
+			s.clearRuntimePartyProjection(identity.character, identity.generation)
+			_err := s.sendDungeonExitPartyLeaveAck(receiver, "member_giveup_single_survivor")
+			errs = errors.Join(errs, _err)
+			errs = errors.Join(errs, s.sendRuntimePartyMemberRemoved(receiver, 0, alignedcmd.PartyState{}))
 			continue
 		}
 		if departingID != 0 {

@@ -588,6 +588,14 @@ func (s *Service) sendTownRemoteActorStateWithPartyFrame(
 	if target.selectedCharacterID != targetCharacterID || actor.Session.selectedCharacterID != charID {
 		return fmt.Errorf("remote town actor selection changed during construction: actor=%d receiver=%d", charID, targetCharacterID)
 	}
+	// 城镇队伍框的血条：客户端读 mode0 时会清 HP 描述符，必须用同一条 op153 的百分比初始化。
+	// 投影失败只记事件并退回原行为，不让一名队友的外观整条失败。
+	if partyFrame {
+		if err := projectCurrentTownPartyHPIntoMode0(mode0Body, s.currentTownPartyRealtimeBody(target, actor.Session), charID); err != nil {
+			s.logGameEvent(target, "game-town-party-hp-projection-failed",
+				"source", source, "peer_char_id", charID, "error", err)
+		}
+	}
 	s.logCurrentPeerActorAppearanceEvent(target, actor.Session, source, mode0Body, mode1Body, subtype0Body)
 	if err := s.sendGameUpperRawClass(
 		target,
@@ -631,6 +639,11 @@ func (s *Service) sendTownRemoteActorStateWithPartyFrame(
 	if !partyFrame {
 		return nil
 	}
+	// 只更新 HP，不重建 op9、不重启 op11：老客户端缺这一条，队伍框血条一直是 0/旧值。
+	if err := s.sendCurrentTownPartyHPAfterActor(target, actor.Session); err != nil {
+		s.logGameEvent(target, "game-town-party-hp-send-failed",
+			"source", source, "peer_char_id", charID, "error", err)
+	}
 	if s.shouldSkipTownCopresencePartyFrame(target, actor.Session) {
 		s.logPacketEvent("game-town-copresence-party-frame-skipped",
 			"conn_id", target.connID,
@@ -643,10 +656,16 @@ func (s *Service) sendTownRemoteActorStateWithPartyFrame(
 			"switch", townCopresenceSkipSamePartyFrameEnv)
 		return nil
 	}
+	frameState := s.townCopresenceActorPartyState(actor.Session)
+	if townCopresenceReceiverPartyFrameEnabled() {
+		// 这条 op9 是收包者自己的队伍 HUD：发他自己的权威名册，
+		// 不能把被投影 actor 的队伍塞进来（陌生人/已退队旧队友会留残留行）。
+		frameState = s.townCopresenceActorPartyState(target)
+	}
 	if _, err := s.sendCurrentPartyActorFrameProjection(
 		target,
 		actor.Session,
-		s.townCopresenceActorPartyState(actor.Session),
+		frameState,
 		"town_copresence_actor_initial_party_state",
 	); err != nil {
 		return fmt.Errorf("send remote town actor op9 display: %w", err)
