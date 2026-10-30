@@ -496,7 +496,10 @@ func (s *Service) handleGameConn(ctx context.Context, conn net.Conn) {
 	// catalog 里第一个普通城镇频道；op1 CHANNELINFO 随后把普通频道告诉客户端，
 	// 由客户端完成换线。普通频道连接时 ResidentFor 原样返回自身（逐字节不变）。
 	residentChannel := channel
-	if catalog := s.currentCatalog(); catalog != nil {
+	// 超时空（type42 [fiendwar]）是可直登的专用团队频道：上游口径要求
+	// "首次 LOGIN 与角色列表阶段都不得把它当作失效特殊频道改回普通频道"。
+	// 默认关闭，只有显式开关打开时才保持真实频道为落点。
+	if catalog := s.currentCatalog(); catalog != nil && !(currentDirectFiendWarChannel(channel) && fiendWarDirectChannelEnabled()) {
 		if candidate, ok := catalog.ResidentFor(channel); ok {
 			residentChannel = candidate
 		}

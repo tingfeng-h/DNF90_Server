@@ -2,6 +2,7 @@ package dnfbridge
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +25,19 @@ func currentColdSpecialChannel(channel channelcatalog.Channel) bool {
 
 // 超时空是可直接进入的专用团队频道。内部目录保持 type42，现用客户端登录/下载
 // 投影为45；不能用“无EXIT交接”把它判成应回普通城镇的特殊频道。
+// fiendWarDirectChannelEnabled 控制"超时空频道保持真实落点、不回落普通频道"。
+// 默认关闭（保持现行为），验证通过后再默认打开。
+const fiendWarDirectChannelEnv = "DNFBRIDGE_FIENDWAR_DIRECT_CHANNEL"
+
+func fiendWarDirectChannelEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(fiendWarDirectChannelEnv))) {
+	case "1", "on", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func currentDirectFiendWarChannel(channel channelcatalog.Channel) bool {
 	group := strings.TrimSpace(channel.Group)
 	group = strings.Trim(group, "[]`")

@@ -14,7 +14,10 @@ func (s *Service) sendCurrentChannelReconnectTownEntry(session *gameSession) err
 	if s == nil || session == nil || !session.channelReconnect || session.selectedCharacterID == 0 {
 		return nil
 	}
-	if session.residentChannel.ID <= 0 || session.residentChannel.ID != session.channel.ID {
+	// 超时空（type42 [fiendwar]）是可直登的专用团队频道：它的落点被
+	// catalog 换成普通频道后仍必须允许重连进城，否则换线到这里直接断线。
+	if session.residentChannel.ID <= 0 ||
+		(session.residentChannel.ID != session.channel.ID && !isCurrentFiendWarChannel(session)) {
 		return fmt.Errorf(
 			"channel reconnect has no committed target identity: connected=%d resident=%d",
 			session.channel.ID,

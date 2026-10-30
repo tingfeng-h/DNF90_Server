@@ -47,6 +47,15 @@ func (s *Service) sendGameConnectionBootstrap(session *gameSession, now time.Tim
 	}
 	accountBound := strings.TrimSpace(session.accountID) != ""
 	ownerChannel, ownerErr := currentCommittedChannelOwner(session)
+	if ownerErr != nil && isCurrentFiendWarChannel(session) {
+		// 超时空频道号（261..263）装不进 u8 owner 字段，但 CHANNELINFO 的
+		// 频道号是 varint，能正常携带。上游口径：owner 只保留 context 0，
+		// 不能因此跳过整个频道通知，否则客户端等不到握手直接断线。
+		ownerChannel, ownerErr = currentSceneObjectContext, nil
+		s.logGameEvent(session, "game-fiendwar-channel-owner-context-zero",
+			"target_channel", session.channel.ID,
+			"reason", "fiendwar_channel_exceeds_u8_owner_field")
+	}
 	if ownerErr == nil && (accountBound || !s.options.gameProactiveEndpointWhenUnbound) {
 		if err := s.sendCurrentChannelResidentNotice(session, now); err != nil {
 			return err

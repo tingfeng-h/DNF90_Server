@@ -43,6 +43,15 @@ func currentCommittedChannelOwner(session *gameSession) (byte, error) {
 	if session == nil {
 		return 0, errResidentChannelUnavailable
 	}
+	// 超时空频道号超出 u8 owner 字段范围时，owner 只能保留 context 0，
+	// 但频道号本身在 CHANNELINFO 里是 varint，可以正常下发。不能让"装不下 owner"
+	// 演变成"跳过整个频道通知"。
+	// 2026-10-30：频道表已改为 61..63（装得下 u8），此处必须**不**再强制 0：
+	// 否则 owner=0 与客户端场景频道 61 不一致，客户端会把自己当成
+	// remote actor 再访问违例（0xC0000005，与当年 508 同一机制）。
+	if isCurrentFiendWarChannel(session) && currentOwnerChannelOversized(session.channel.ID) {
+		return currentSceneObjectContext, nil
+	}
 	// 2026-09-27 现场：客户端 trace 无限刷
 	//   mode0-owner-compare scene_channel=252 local_owner_channel=10 branch=remote-actor
 	// 场景频道（会话真实所在 252）与我们下发的 owner 频道（catalog 选出的 10）不一致时，
@@ -157,7 +166,22 @@ func (s *Service) sendCurrentChannelResidentNotice(session *gameSession, now tim
 	// 永远不可能一致 ⇒ `branch=remote-actor` ⇒ 访问违例。这里同时写具名事件。
 	ownerSource := "connected_channel"
 	substitutedFrom := 0
-	if currentOwnerChannelOversized(session.channel.ID) {
+	// 超时空（type42）直连：频道号 261..263 装不进 u8 owner 字段，但 op1 CHANNELINFO 的
+	// 频道号本身是 varint（field 8），owner 已由 currentCommittedChannelOwner 回退
+	// context 0。若这里仍按“owner 装不下 ⇒ 换 catalog 落点”处理，落点同样是 261
+	// （DNFBRIDGE_FIENDWAR_DIRECT_CHANNEL=on 时 game.go 不替换），于是这里直接返回
+	// errResidentChannelRange，客户端等不到 CHANNELINFO 就断线。
+	// 现场 2026-10-30：error_len=80 =
+	// "dnf resident channel field exceeds current EXE range: connected=261 resident=261"。
+	fiendWarDirect := isCurrentFiendWarChannel(session) && fiendWarDirectChannelEnabled()
+	if fiendWarDirect && currentOwnerChannelOversized(session.channel.ID) {
+		ownerSource = "fiendwar_direct_channel"
+		s.logGameEvent(session, "game-current-channel-notice-fiendwar-direct",
+			"current_channel_id", session.channel.ID,
+			"current_channel_type", session.channel.Type,
+			"owner_field", currentSceneObjectContext,
+			"reason", "fiendwar_channel_exceeds_u8_owner_field")
+	} else if currentOwnerChannelOversized(session.channel.ID) {
 		landing, landingOK := currentOwnerChannelFieldValue(session.residentChannel.ID)
 		if !landingOK {
 			return fmt.Errorf("%w: connected=%d resident=%d",
