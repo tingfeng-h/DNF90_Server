@@ -82,6 +82,11 @@ func (s *Service) handleCurrentPeerChat(session *gameSession, typ uint16, body [
 	sourceID := selectedCharacterID(session)
 	mainWhisper := s.options.currentClientVersion == "official-24.9" && request.MessageType == 1
 	verifiedWhisper := mainWhisper || isCurrentPrivateWhisperType(request.MessageType)
+	if !verifiedWhisper && whisperNativeEnabled() && isCurrentPrivateWhisperTypeNative(request.MessageType) {
+		// 收到过对方私聊后，客户端的"回复"走 0x29，且带尾值；
+		// 只放行这一道类型门，后续仍由 native 分支接管路由。
+		verifiedWhisper = true
+	}
 	if request.HasTrailingValue && !verifiedWhisper {
 		// Group/party variants need their own authenticated recipient owner.
 		// Never project their private text to a guessed town or single peer.
