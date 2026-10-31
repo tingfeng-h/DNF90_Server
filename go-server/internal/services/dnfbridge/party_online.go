@@ -738,6 +738,12 @@ func (s *Service) sendDungeonPartyFrameRoster(state alignedcmd.PartyState, sourc
 	if len(members) < 2 {
 		return 0
 	}
+	// 实验档：让队伍帧带上真实 party 号，客户端才会调 sub_29762B0
+	// 重置每个成员的显示槽位（+116）。关闭：DNFBRIDGE_PARTY_OP9_REAL_PARTY_ID=off。
+	if readPartyOp9RealPartyID() {
+		currentSceneOp9PartyIDOverride = uint16(state.PartyID)
+		defer func() { currentSceneOp9PartyIDOverride = 0 }()
+	}
 	sessions := make([]*gameSession, 0, len(members))
 	var runKey dungeonPartyRunKey
 	clearedStaleKeys := 0

@@ -1,7 +1,9 @@
 package dnfbridge
 
 import (
+	"os"
 	"sort"
+	"strings"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 	"longheng.io/server/internal/modules/dnf/dnfenum"
@@ -13,6 +15,30 @@ const (
 	currentSceneOp9ActorRemoveKind  byte   = 3
 	currentSceneOp9StableSceneValue uint16 = 9999
 )
+
+const partyOp9RealPartyIDEnv = "DNFBRIDGE_PARTY_OP9_REAL_PARTY_ID"
+
+// currentSceneOp9PartyIDOverride 是实验性覆盖：队伍帧的 party 字段默认写
+// 9999（场景 actor 帧的约定值）。但客户端 sub_2016350 只有
+// party != 9999 时才会调 sub_29762B0（把成员的显示槽位 +116 置 -1），
+// 否则离队成员的行会作为“离线”残留（红电脑）。
+var currentSceneOp9PartyIDOverride uint16
+
+func readPartyOp9RealPartyID() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(partyOp9RealPartyIDEnv))) {
+	case "on", "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func currentSceneOp9PartyWireValue() uint16 {
+	if currentSceneOp9PartyIDOverride != 0 && readPartyOp9RealPartyID() {
+		return currentSceneOp9PartyIDOverride
+	}
+	return currentSceneOp9StableSceneValue
+}
 
 func buildCurrentSceneOp9NoopBody() []byte {
 	var writer packetWriter
@@ -42,6 +68,27 @@ func buildCurrentSceneOp9ActorRemovalBodyInContext(
 		server = serverRoute[0]
 	}
 	writer.writeByte(server)
+	writer.writeByte(ownerChannel)
+	writer.writeByte(0)
+	writer.writeByte(currentSceneOp9ActorRemoveKind)
+	return writer.bytes()
+}
+
+// buildCurrentSceneOp9ActorRemovalBodyWithParty 与 kind3 消毁包同形，
+// 但把包头的 party 字段从 9999 换成**当前真实队伍号**。
+// 客户端 sub_2016350：party==9999 时跳过 reset（所有成员 +116 不会被置 -1），
+// 只会走记录循环里的 sub_6EC5000 清场景槽位；
+// 带真实 party 号时才会先 reset 再按记录处理。
+func buildCurrentSceneOp9ActorRemovalBodyWithParty(sceneObjectKey uint16, ownerChannel byte, partyID uint16, serverRoute byte) []byte {
+	var writer packetWriter
+	writer.writeUint16(1)
+	if partyID == 0 {
+		writer.writeUint16(currentSceneOp9StableSceneValue)
+	} else {
+		writer.writeUint16(partyID)
+	}
+	writer.writeUint16(sceneObjectKey)
+	writer.writeByte(serverRoute)
 	writer.writeByte(ownerChannel)
 	writer.writeByte(0)
 	writer.writeByte(currentSceneOp9ActorRemoveKind)
@@ -193,7 +240,7 @@ func buildCurrentSceneOp9ActorPartyDisplayBodyForProfile(
 
 	var writer packetWriter
 	writer.writeUint16(1)
-	writer.writeUint16(currentSceneOp9StableSceneValue)
+	writer.writeUint16(currentSceneOp9PartyWireValue())
 
 	writer.writeUint16(sceneObjectKey)
 	server := byte(currentSceneObjectRoute)

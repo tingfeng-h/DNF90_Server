@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
+	"longheng.io/server/internal/modules/dnf/dnfenum"
 	"longheng.io/server/internal/modules/dnf/party"
 )
 
@@ -101,6 +102,39 @@ func (s *Service) transferRuntimePartyOnDungeonLeaderExit(
 	// 其余成员依次 1..n-1。否则新队长还挂在原来的 slot 1，客户端标记不换人。
 	normalized := normalizeRuntimePartySlotsForProjection(nextState)
 	s.syncRuntimePartyUDPRelay(nextState)
+	// 先给每个幸存者发一条"带真实 party 号的 kind3"（被清理的是离队队长的记录）。
+	// 与旧的 9999 消毁包相比，客户端这次会先 reset 再处理记录，
+	// 将离队者的显示槽位（+116）置为 -1，避免左上角队伍栏保留"红电脑"行。
+	if partyScopedKind3Enabled() {
+		for _, member := range runtimePartyMembers(normalized) {
+			memberIdentity, online := s.onlineGameSessionCharacterSnapshot(member.UserID)
+			if !online || memberIdentity.session == nil {
+				continue
+			}
+			for _, ownerChannel := range []byte{0, byte(currentTownPresenceChannelID(memberIdentity.session))} {
+				body := buildCurrentSceneOp9ActorRemovalBodyWithParty(
+					currentSceneActorObjectKey(leavingCharacterID),
+					ownerChannel,
+					uint16(normalized.PartyID),
+					s.currentSceneActorRoute(),
+				)
+				if err := s.sendGameUpperRawClass(memberIdentity.session, uint16(dnfenum.CmdPacketRecoverStamina), body, 0); err != nil {
+					s.logGameEvent(memberIdentity.session, "game-party-dungeon-leader-exit-kind3-failed",
+						"source", source, "char_id", member.UserID, "error", err)
+					continue
+				}
+				s.logGameEvent(memberIdentity.session, "game-party-dungeon-leader-exit-kind3-send",
+					"source", source,
+					"receiver_char_id", member.UserID,
+					"record_char_id", leavingCharacterID,
+					"party_id", normalized.PartyID,
+					"owner_channel", ownerChannel,
+					"body_len", len(body),
+					"reason", "party_scoped_kind3_makes_the_client_reset_the_display_slots_before_removing_the_record")
+			}
+		}
+	}
+
 	// 两段式：客户端在副本里只会“更新已有行”，不会因为名册里
 	// 槽位变了就把队长标记换人。先发一次空名册（让它把本地队伍表
 	// 拆掉），紧接着发新队长在 slot 0 的完整名册，相当于“重建”。
@@ -129,7 +163,7 @@ func (s *Service) transferRuntimePartyOnDungeonLeaderExit(
 			"new_leader_id", next.UserID,
 			"switch", leaderTransferTwoPhaseEnv,
 			"reason", "client_only_updates_existing_dungeon_rows_so_the_table_is_cleared_then_rebuilt")
-	} else if err := s.sendChangeHostRuntimePartySnapshots(nextState); err != nil {
+	} else if err := s.sendChangeHostRuntimePartySnapshots(normalized); err != nil {
 		s.logGameEvent(session, "game-party-dungeon-leader-exit-roster-failed",
 			"source", source, "party_id", nextState.PartyID, "error", err)
 	}
@@ -244,6 +278,18 @@ const leaderTransferTwoPhaseEnv = "DNFBRIDGE_PARTY_LEADER_TRANSFER_TWOPHASE"
 // leaderTransferTwoPhaseEnabled 默认 on；显式 off/0/false/no 回退到单段名册。
 func leaderTransferTwoPhaseEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(leaderTransferTwoPhaseEnv))) {
+	case "off", "0", "false", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+const partyScopedKind3Env = "DNFBRIDGE_PARTY_LEADER_KIND3_PARTY_SCOPED"
+
+// partyScopedKind3Enabled 默认 on；显式 off/0/false/no 关闭。
+func partyScopedKind3Enabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(partyScopedKind3Env))) {
 	case "off", "0", "false", "no":
 		return false
 	default:
