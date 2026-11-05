@@ -2023,7 +2023,7 @@ func buildCurrentEquipmentRawEntryFromMoveEvidence(
 			petArtifactSource = equipSlot == 29
 		}
 	}
-	if (sourceListType != wireListMain && sourceListType != wireListAvatar && !petArtifactSource) ||
+	if (sourceListType != wireListMain && sourceListType != wireListAvatar && sourceListType != wireListGuildMedal && !petArtifactSource) ||
 		stack.ItemID <= 0 || stack.ItemID > int64(^uint32(0)) || stack.Count != 1 ||
 		sourceInstanceValue == 0 || stack.Extra == nil ||
 		!strings.EqualFold(strings.TrimSpace(stack.Extra["item_kind"]), "equipment") ||
