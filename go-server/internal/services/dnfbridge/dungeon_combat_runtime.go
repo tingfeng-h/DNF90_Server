@@ -513,7 +513,11 @@ func (s *Service) handleDungeonMonsterDeathRequest(
 						var rewardResult hellPartyRewardResult
 						var rewardErr error
 						if s.options.currentClientVersion == "official-24.9" {
-							rewardResult, rewardErr = currentNativePVFHellReward(rewardRequest)
+							if currentNormalAbyssEpicClearReady(runtime, groupID) {
+								rewardResult, rewardErr = currentNormalAbyssEpicClearReward(rewardRequest)
+							} else {
+								rewardResult, rewardErr = currentNativePVFHellReward(rewardRequest)
+							}
 						} else {
 							rewardResult, rewardErr = hellPartyRewardRolls(rewardRequest)
 						}
