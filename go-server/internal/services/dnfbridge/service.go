@@ -58,6 +58,7 @@ type Service struct {
 	guildCreateMu                sync.Mutex
 	activityRankService          *activityrank.Service
 	playerStatsQueries           gamePlayerStatsQueries
+	partyNativeAdmission         partyNativeConnectionAdmission
 	channelHandoffMu             sync.Mutex
 	channelHandoffs              map[currentAuthenticatedChannelHandoffKey]*currentAuthenticatedChannelHandoff
 	guildDungeonCatalogMu        sync.Mutex
@@ -66,6 +67,8 @@ type Service struct {
 	launcherDiagnostics          launcherDiagnosticStore
 	performance                  *bridgePerformanceMetrics
 	guildRankingMu               sync.Mutex
+	guildRankingGate             chan struct{}
+	guildRankingWake             chan struct{}
 	guildRankingCatalogMu        sync.Mutex
 	guildRankingRules            *dnfguild.RankingRules
 	guildEssenceCatalog          *dnfguild.EssenceCatalog                                                    // guarded by guildDungeonCatalogMu

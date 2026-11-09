@@ -17,7 +17,9 @@ import (
 func TestRealPVFRaidTableReturnActive(t *testing.T) {
 	catalog, _ := actualAntonRewardFixture(t)
 	a := catalog.source.(*platformpvf.Archive)
-	for _, kind := range []string{"op42_control", "table72"} {
+	// Leader table72 now has its own whole-party regression. Personal exits
+	// must retain this original boundary: only the requesting player leaves.
+	for _, kind := range []string{"op13_personal", "op42_control"} {
 		t.Run(kind, func(t *testing.T) {
 			f, owners, conns, _ := deadlineAuditV10Admit(t, a, false)
 			s := f.service
@@ -28,18 +30,19 @@ func TestRealPVFRaidTableReturnActive(t *testing.T) {
 					t.Fatal(err)
 				}
 				deadlineAuditV10Event(t, s, p, func() error {
-					if op == 42 {
+					if op == 42 || op == 13 {
 						return s.handleGameUpper(p, frame)
 					}
 					return s.handleLegacyGamePacket(p, frame)
 				})
 			}
 			dispatch(owners[0], 16, encodeCurrentDungeonSelectRequest(dungeoncmd.SelectDungeonRequest{DungeonID: 210, Difficulty: 2}))
+			completeNativePartyAdmissionForTest(t, s, owners[0])
 			runs := make([]*runtimeDungeonState, 2)
 			for i := 0; i < 2; i++ {
 				runs[i] = owners[i].dungeon.runtime
 				if runs[i] == nil || runs[i].raidEntry == nil || runs[i].Dungeon.ID != 210 {
-					t.Fatal("real op16 admission failed")
+					t.Fatalf("real op16 admission failed; fixture trace:\n%s", f.logText(t))
 				}
 				dispatch(owners[i], 37, make([]byte, 8))
 			}
@@ -82,11 +85,10 @@ func TestRealPVFRaidTableReturnActive(t *testing.T) {
 				t.Fatal(err)
 			}
 			op := uint16(42)
-			var body []byte
-			if kind == "table72" {
-				op = 72
-				body = []byte{1, 2}
+			if kind == "op13_personal" {
+				op = 13
 			}
+			var body []byte
 			dispatch(owners[0], op, body)
 			after, _, err := f.repos.Character.Load(context.Background(), strconv.Itoa(int(owners[0].selectedCharacterID)))
 			if err != nil {
@@ -127,6 +129,15 @@ func TestRealPVFRaidTableReturnActive(t *testing.T) {
 			}
 			if owners[1].dungeon.runtime != runs[1] || runs[1].Session.Snapshot().Run.Status != worldmap.DungeonRunActive {
 				t.Fatal("retired peer run")
+			}
+			if kind == "op13_personal" {
+				assertDepartureStreamRetiresSelfFirst(t, owners[0], conns[0].bytes())
+				if _, found := s.runtimePartyManagerForService().SnapshotByUser(owners[0].selectedCharacterID, 0); found {
+					t.Fatal("ESC raid leave retained party membership")
+				}
+				if _, found := s.runtimePartyManagerForService().SnapshotByUser(owners[1].selectedCharacterID, 0); !found {
+					t.Fatal("ESC raid leave disbanded survivor party")
+				}
 			}
 			if len(b.ClearedRuns) != 0 || len(b.MemberClears) != 0 || b.PhaseCompleted {
 				t.Fatal("manufactured clear/reward")

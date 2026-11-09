@@ -460,6 +460,7 @@ func (s *Service) sendCurrentDungeonReturnToTownLocked(
 	s.cancelCurrentDungeonDeathReturnLocked(session, runtime, "town_return_transition_started")
 	if !runtime.townReturnPending {
 		runtime.townReturnPending = true
+		setCurrentAikenSupportTitleProjection(session, nil)
 		runtime.townReturnRequestMsgID = requestMsgID
 		runtime.townReturnSource = source
 		runtime.townReturnTransition = cloneCurrentDungeonTownTransition(transition)
@@ -558,6 +559,7 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		}
 		s.cancelCurrentDungeonDeathReturnLocked(session, runtime, "completed_town_actor_route_started")
 		runtime.townReturnPending = true
+		setCurrentAikenSupportTitleProjection(session, nil)
 		runtime.townReturnRequestMsgID = requestMsgID
 		runtime.townReturnSource = source
 		runtime.townReturnTransition = cloneCurrentDungeonTownTransition(transition)
@@ -683,6 +685,7 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// completed_town_route 回城，最后一个成员到位后重建城镇同屏）。
 		leaderExitInstance = runtime.partyInstance
 		session.dungeon.runtime = nil
+		setCurrentAikenSupportTitleProjection(session, nil)
 		s.releaseCurrentTagTournamentAfterTownCommit(session, runtime)
 		if runtime.guildPractice != nil {
 			releaseCurrentGuildPracticeProjection(session)
@@ -765,6 +768,7 @@ func resetCurrentDungeonReturnAttempt(runtime *runtimeDungeonState) {
 	runtime.townReturnAckSent = false
 	runtime.townReturnSource = ""
 	runtime.townReturnTransition = currentDungeonTownTransition{}
+	runtime.raidTablePartyReturn = nil
 }
 
 // acknowledgeCurrentDungeonGiveupReturnLocked holds dungeon.mu. The saved
@@ -838,9 +842,13 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 			source+"_resume_confirmed_return",
 		)
 	}
-	if runtime.townReturnSource == currentRaidTableReturnSource && !s.currentRaidTableActiveReturnReady(session, runtime) {
+	if (runtime.townReturnSource == currentRaidTableReturnSource || runtime.townReturnSource == currentRaidTablePartyReturnSource) && !s.currentRaidTableActiveReturnReady(session, runtime) {
 		session.dungeon.mu.Unlock()
 		return fmt.Errorf("raid table return owner changed before town confirmation")
+	}
+	if runtime.raidTablePartyReturn != nil && !s.currentRaidTablePartyReturnMatches(session, runtime, runtime.raidTablePartyReturn) {
+		session.dungeon.mu.Unlock()
+		return fmt.Errorf("raid table party changed before town confirmation")
 	}
 	snapshot := runtime.Session.Snapshot()
 	deadlineOwner := runtime.raidDeadlineReturn
@@ -911,6 +919,7 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 	leaderExitInstance := runtime.partyInstance
 	leaderExitCharacterID := session.selectedCharacterID
 	session.dungeon.runtime = nil
+	setCurrentAikenSupportTitleProjection(session, nil)
 	s.releaseCurrentTagTournamentAfterTownCommit(session, runtime)
 	if runtime.guildPractice != nil {
 		releaseCurrentGuildPracticeProjection(session)
@@ -960,6 +969,9 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 		s.settleRuntimePartyOnDungeonCompletionReturn(session, leaderExitInstance, leaderExitCharacterID, "back_to_village_committed")
 	} else if runtime.fiendWarRetreatKeepsParty {
 		s.logGameEvent(session, "超时空整队撤退已保留临时队伍", "source", source)
+	} else if runtime.raidTablePartyReturn != nil {
+		s.logGameEvent(session, "game-raid-table-return-party-retained", "source", source,
+			"leader_char_id", runtime.raidTablePartyReturn.leader.character)
 	} else if deadlineOwner != nil {
 		// An automatic phase deadline is not a player-requested leader leave.
 		// Keep the still-authoritative party/relay; every admitted occupant
@@ -1123,6 +1135,7 @@ func resetDungeonReturnSceneGates(session *gameSession) {
 	if session == nil {
 		return
 	}
+	session.dungeonPlacementEpoch.Add(1)
 	session.runtimeAfterBlacklistSent = false
 	session.runtimeFinishLoadingGateSent = false
 	session.fpsFinishLoadingGateSent = false
@@ -1137,6 +1150,7 @@ func resetDungeonEntrySceneGates(session *gameSession) {
 	if session == nil {
 		return
 	}
+	session.dungeonPlacementEpoch.Add(1)
 	if session.selectedCharacterID == 0 {
 		// 返回选角结束原角色的对象归属；不能凭旧角色的写出记录跳过新登录。
 		session.selectedMainInventoryCharacterID = 0
