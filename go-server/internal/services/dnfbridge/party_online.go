@@ -1685,8 +1685,6 @@ func (s *Service) closeRuntimePartyUDPRelay(partyID int) {
 	defer mutation.Unlock()
 	// 与 sync 侧同一个后端：remote 档下这是给 a21-relay 发 CLOSE 交还租约（不等 30s 自然到期）。
 	current, exists := s.runtimePartyManagerForService().SnapshotByID(uint16(partyID))
-	s.logWarn("party relay close probe", "party_id", partyID,
-		"party_found", exists, "members", len(current.Members))
 	if exists && len(current.Members) > 1 {
 		return // A delayed close must not tear down a currently rejoined lobby.
 	}
@@ -1790,13 +1788,7 @@ func (s *Service) sendRuntimePartyMemberRemoved(session *gameSession, _ uint16, 
 }
 
 func (s *Service) sendCurrentPartyFrameProjection(session *gameSession, state alignedcmd.PartyState, source string) (bool, error) {
-	sent, err := s.sendCurrentPartyActorFrameProjection(session, session, state, source)
-	if !sent && session != nil {
-		s.logGameEvent(session, "game-party-frame-skip", "source", source,
-			"char_id", session.selectedCharacterID, "party_id", state.PartyID,
-			"members", len(state.Members), "error", err)
-	}
-	return sent, err
+	return s.sendCurrentPartyActorFrameProjection(session, session, state, source)
 }
 
 func (s *Service) sendCurrentPartyActorFrameProjection(

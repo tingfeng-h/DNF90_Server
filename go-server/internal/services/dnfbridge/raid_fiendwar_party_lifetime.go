@@ -71,13 +71,8 @@ func (s *Service) retireCurrentFiendWarPartySnapshot(p *gameSession, frozen part
 	for _, member := range current.Members {
 		peer, online := s.onlineGameSessionCharacterSnapshot(member.UserID)
 		if !online || peer.generation != member.SessionGeneration {
-			s.logGameEvent(p, "game-fiendwar-retire-member-skip",
-				"char_id", member.UserID, "online", online,
-				"gen_match", online && peer.generation == member.SessionGeneration,
-				"expect_gen", member.SessionGeneration)
 			continue
 		}
-		s.logGameEvent(p, "game-fiendwar-retire-member-send", "char_id", member.UserID)
 		// Do not erase a new party created after this atomic retirement.
 		if _, replaced := manager.SnapshotByUser(member.UserID, 0); replaced {
 			continue
@@ -157,18 +152,10 @@ func (s *Service) flushFiendWarPartyClearOnTownSceneReady(session *gameSession, 
 		return
 	}
 	if state := s.runtimePartyStateForSession(session); state.PartyID > 0 {
-		s.logGameEvent(session, "game-fiendwar-party-clear-town-ready-skipped",
-			"source", source, "char_id", session.selectedCharacterID, "party_id", state.PartyID,
-			"reason", "character_joined_a_new_party_during_the_return")
 		return
 	}
 	if err := s.sendRuntimePartyMemberRemoved(session, 0, alignedcmd.PartyState{}); err != nil {
 		s.logGameEvent(session, "game-fiendwar-party-clear-town-ready-failed",
 			"source", source, "char_id", session.selectedCharacterID, "error", err)
-		return
 	}
-	s.logGameEvent(session, "game-fiendwar-party-clear-town-ready",
-		"source", source, "char_id", session.selectedCharacterID,
-		"owner_channel", currentClientSelectedChannel(session),
-		"reason", "the_retire_frame_was_sent_before_the_town_context_was_ready")
 }

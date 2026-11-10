@@ -246,12 +246,6 @@ func (s *Service) freezeCurrentRaidDungeonGroupEntry(session *gameSession, runti
 			// 之后无论回程走服务端提交点还是客户端切场景重连，都能收口。
 			if snapshot, found := s.runtimePartyManagerForService().SnapshotByUser(target.session.selectedCharacterID, 0); found {
 				s.rememberFiendWarEncounterParty(copy.RaidKey, snapshot, false)
-				s.logGameEvent(target.session, "game-fiendwar-party-remembered",
-					"party_id", snapshot.ID, "raid_key", copy.RaidKey, "run_id", copy.RunID,
-					"members", len(snapshot.Members))
-			} else {
-				s.logGameEvent(target.session, "game-fiendwar-party-remember-miss",
-					"char_id", target.session.selectedCharacterID, "raid_key", copy.RaidKey)
 			}
 		}
 		if b.Mode == 1 && !b.Single {

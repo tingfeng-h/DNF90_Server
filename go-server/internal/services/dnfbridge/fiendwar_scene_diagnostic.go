@@ -67,11 +67,6 @@ func (s *Service) logFiendWarSceneDiagnostic(p *gameSession, r *runtimeDungeonSt
 	if (stage == "post_start_placement" || stage == "finish_loading_placement") && r.raidEntry != nil {
 		if snapshot, found := s.runtimePartyManagerForService().SnapshotByUser(p.selectedCharacterID, 0); found {
 			s.rememberFiendWarEncounterParty(r.raidEntry.RaidKey, snapshot, true)
-			s.logGameEvent(p, "game-fiendwar-party-remembered", "party_id", snapshot.ID,
-				"raid_key", r.raidEntry.RaidKey, "run_id", r.raidEntry.RunID, "members", len(snapshot.Members))
-		} else {
-			s.logGameEvent(p, "game-fiendwar-party-remember-miss", "char_id", p.selectedCharacterID,
-				"generation", p.characterGeneration, "raid_key", r.raidEntry.RaidKey)
 		}
 	}
 	finishGates := p.finishLoadingGateSnapshot()
