@@ -766,6 +766,15 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 	defer s.raidMu.Unlock()
 	state := s.runtimeRaidByMemberLocked(sourceID)
 	if state == nil || state.LeaderID != sourceID || len(state.Members) == 0 || len(state.Members) > currentRaidMemberMaximum(*state) {
+		if session != nil {
+			if state == nil {
+				s.logGameEvent(session, "game-raid-start-probe", "reason", "no_raid_for_member", "char_id", sourceID)
+			} else {
+				s.logGameEvent(session, "game-raid-start-probe", "reason", "leader_or_size",
+					"char_id", sourceID, "leader", state.LeaderID, "members", len(state.Members),
+					"max", currentRaidMemberMaximum(*state), "started", state.Started, "raid_key", state.RaidKey)
+			}
+		}
 		return runtimeRaidState{}, false, nil
 	}
 	if state.Started {
@@ -801,16 +810,30 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 			"source", "raid_start_default_group_assignment")
 	}
 	if runtimeRaidHasOversizedGroup(*state) {
+		if session != nil {
+			s.logGameEvent(session, "game-raid-start-probe", "reason", "oversized_group",
+				"members", len(state.Members), "raid_key", state.RaidKey)
+		}
 		return runtimeRaidState{}, false, nil
 	}
 	seen := make(map[uint16]bool, len(state.Members))
 	for _, member := range state.Members {
 		if member.CharID == 0 || seen[member.CharID] || member.GroupIndex > currentRaidGroupMaximum(*state) {
+			if session != nil {
+				s.logGameEvent(session, "game-raid-start-probe", "reason", "invalid_member",
+					"member_char_id", member.CharID, "group", member.GroupIndex,
+					"max_group", currentRaidGroupMaximum(*state), "raid_key", state.RaidKey)
+			}
 			return runtimeRaidState{}, false, nil
 		}
 		// A retained offline seat is not a paid admission. Bind/restore or
 		// expiry must resolve it before the current aggregate is frozen.
 		if seat, reserved := s.currentRaidDisconnects[member.CharID]; state.CurrentLayout && reserved && seat.Raid == state {
+			if session != nil {
+				s.logGameEvent(session, "game-raid-start-probe", "reason", "retained_offline_seat",
+					"member_char_id", member.CharID, "raid_key", state.RaidKey,
+					"current_layout", state.CurrentLayout, "seat_raid", seat.Raid.RaidKey)
+			}
 			return runtimeRaidState{}, false, nil
 		}
 		seen[member.CharID] = true
@@ -1104,7 +1127,7 @@ func (s *Service) nextRuntimeRaidKeyLocked(session *gameSession, sourceID uint16
 		// global56A1E74 (field7: advertised server) before parsing 591.
 		prefix = channelID<<16 | uint32(s.channelAdvertiseID())<<24
 	}
-	base := prefix | uint32(sourceID)
+	base := prefix | uint32(uint16(sourceID)+s.raidKeyEpoch)
 	if base != 0 {
 		if _, exists := s.raids[base]; !exists {
 			return base
@@ -1112,7 +1135,7 @@ func (s *Service) nextRuntimeRaidKeyLocked(session *gameSession, sourceID uint16
 	}
 	for {
 		s.nextRaidSeq++
-		key := prefix | uint32(uint16(s.nextRaidSeq))
+		key := prefix | uint32(uint16(s.nextRaidSeq)+s.raidKeyEpoch)
 		if key == 0 {
 			continue
 		}

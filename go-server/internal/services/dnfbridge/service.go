@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,6 +128,10 @@ type Service struct {
 	expertJobVisitors         map[*gameSession]uint16
 	raidMu                    sync.Mutex
 	raids                     map[uint32]*runtimeRaidState
+	// 遭遇战临时队伍快照按 raid+run 保存在服务侧：客户端打完是切场景重连，
+	// per-session 的 runtime 会丢，挂在上面的快照也就没人能收口了。
+	fiendWarPartyMu           sync.Mutex
+	fiendWarEncounterParties  map[uint32]map[uint16]*fiendWarEncounterPartyEntry
 	currentRaidDisconnects    map[uint16]currentRaidDisconnectSeat
 	// Protected by raidMu; bounds queued deadline cleanup to one worker per runtime.
 	currentRaidDeadlineQueued map[*runtimeDungeonState]bool
@@ -137,6 +142,9 @@ type Service struct {
 	antonRewardFlows          map[string]*currentAntonRewardFlow
 	antonRewardWorkRunning    bool
 	nextRaidSeq               uint32
+	// raidKeyEpoch 把进程级随机量折进攻坚队 key，避免重启后复用同一个 key
+	// 与客户端缓存的旧攻坚队撞车（现场症状：客户端没退、服务端重启后无法开团）。
+	raidKeyEpoch              uint16
 	packetLog                 *packetLogger
 	partyUDPRelay             *currentPartyUDPRelay
 	// partyUDPRelayRemote 是 remote 档（厂商架构）的控制通道客户端：
@@ -357,6 +365,10 @@ func NewWithOptions(env *appkit.Env, serviceOptions ServiceOptions) *Service {
 		clientAccounts:          newClientAccountRegistry(),
 		localLoginStopped:       true,
 		runtimePartyManager:     party.NewRuntimePartyManager(),
+	}
+	service.raidKeyEpoch = uint16(time.Now().UnixNano() >> 8)
+	if strings.TrimSpace(os.Getenv("DNFBRIDGE_RAID_KEY_EPOCH")) == "0" {
+		service.raidKeyEpoch = 0
 	}
 	service.gameplayTimers = newProcessGameplayTimeQueue(func(name string, recovered any) {
 		service.logWarn("dnfbridge gameplay timer callback panic", "timer_name", name, "recovered", recovered)

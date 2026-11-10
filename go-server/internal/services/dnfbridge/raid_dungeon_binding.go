@@ -193,13 +193,20 @@ func (s *Service) freezeCurrentRaidDungeonGroupEntry(session *gameSession, runti
 		// The eight raid numbers are permanent seats, not the temporary combat
 		// party. Freeze that party's identity separately for encounter cleanup.
 		if entry.fiendWarParty == nil {
-			if snapshot, found := s.runtimePartyManagerForService().SnapshotByUser(session.selectedCharacterID, session.characterGeneration); found {
+			snapshot, found := s.runtimePartyManagerForService().SnapshotByUser(session.selectedCharacterID, session.characterGeneration)
+			{
 				ids := make([]uint16, 0, len(snapshot.Members))
 				for _, member := range snapshot.Members {
 					ids = append(ids, member.UserID)
 				}
-				if sameRaidParticipants(ids, entry.Participants) {
+				s.logGameEvent(session, "game-fiendwar-party-bind-probe",
+					"char_id", session.selectedCharacterID, "found", found,
+					"party_members", len(ids), "participants", len(entry.Participants),
+					"match", found && sameRaidParticipants(ids, entry.Participants),
+					"generation", session.characterGeneration)
+				if found && sameRaidParticipants(ids, entry.Participants) {
 					entry.fiendWarParty = &snapshot
+
 				}
 			}
 		}

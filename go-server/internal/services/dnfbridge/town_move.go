@@ -83,6 +83,9 @@ func (s *Service) handleTownSetUserAreaWithCommit(session *gameSession, body []b
 	}
 	fplan, err := s.prepareCurrentFiendWarMove(session, request)
 	if err != nil {
+		s.logGameEvent(session, "game-fiendwar-move-rejected-detail",
+			"char_id", session.selectedCharacterID, "town_id", request.TownID,
+			"area_id", request.AreaID, "reason", err.Error())
 		s.logTownSetUserAreaBlocked(session, request, "超时空区域移动被拒绝")
 		return nil
 	}
@@ -100,6 +103,10 @@ func (s *Service) handleTownSetUserAreaWithCommit(session *gameSession, body []b
 				d.reason = "area_move_committed"
 			}
 			s.logCurrentFiendWarAdmissionDiagnostic(d)
+			if fplan != nil && fplan.confirmed {
+				// 区域移动提交是回程上唯一确定会执行的点（客户端切场景重连不经过回城提交）。
+				s.retireStaleFiendWarEncounterParties(session)
+			}
 		}()
 	}
 	defer s.cancelCurrentFiendWarMove(fplan)
