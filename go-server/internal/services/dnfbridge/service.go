@@ -131,9 +131,15 @@ type Service struct {
 	raids                     map[uint32]*runtimeRaidState
 	// 遭遇战临时队伍快照按 raid+run 保存在服务侧：客户端打完是切场景重连，
 	// per-session 的 runtime 会丢，挂在上面的快照也就没人能收口了。
-	fiendWarPartyMu           sync.Mutex
-	fiendWarEncounterParties  map[uint32]map[uint16]*fiendWarEncounterPartyEntry
-	currentRaidDisconnects    map[uint16]currentRaidDisconnectSeat
+	fiendWarPartyMu          sync.Mutex
+	fiendWarEncounterParties map[uint32]map[uint16]*fiendWarEncounterPartyEntry
+	// recentPartyMu/recentPartyByCharacter 记录"某角色最近从哪支队伍离开"：
+	// 同一个人重入**同一 party id** 时，客户端缓存的 P2P 会话不会重置，表现为
+	// 老成员的新腿一个包都不发、重入方一直"连接中"。加入时据此换一个新 party id，
+	// 和现场"踢一个队员后就能重新组上"是同一机理。见 party_rejoin_rebuild.go。
+	recentPartyMu          sync.Mutex
+	recentPartyByCharacter map[uint16]recentPartyDeparture
+	currentRaidDisconnects map[uint16]currentRaidDisconnectSeat
 	// Protected by raidMu; bounds queued deadline cleanup to one worker per runtime.
 	currentRaidDeadlineQueued map[*runtimeDungeonState]bool
 	currentRaidApplications   map[uint16]currentRaidApplication
@@ -145,9 +151,9 @@ type Service struct {
 	nextRaidSeq               uint32
 	// raidKeyEpoch 把进程级随机量折进攻坚队 key，避免重启后复用同一个 key
 	// 与客户端缓存的旧攻坚队撞车（现场症状：客户端没退、服务端重启后无法开团）。
-	raidKeyEpoch              uint16
-	packetLog                 *packetLogger
-	partyUDPRelay             *currentPartyUDPRelay
+	raidKeyEpoch  uint16
+	packetLog     *packetLogger
+	partyUDPRelay *currentPartyUDPRelay
 	// partyUDPRelayRemote 是 remote 档（厂商架构）的控制通道客户端：
 	// 注册到独立进程 a21-relay 换取端口矩阵，本进程不 bind 任何中继 UDP 端口。
 	// 与 partyUDPRelay 至多一个非 nil（由 newPartyUDPRelayBackends 决定）。

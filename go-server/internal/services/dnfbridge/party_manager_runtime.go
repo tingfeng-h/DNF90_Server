@@ -524,6 +524,9 @@ func (s *Service) logRuntimePartyMembershipRemoved(
 	if s == nil || characterID == 0 {
 		return
 	}
+	// 记录"这个角色刚离开哪支队"。加入时若又回到同一 party id，bridge 会重建新 id，
+	// 让客户端丢掉缓存的 P2P 会话（见 party_rejoin_rebuild.go）。
+	s.notePartyDeparture(characterID, before.ID)
 	session, _ := s.onlineGameSession(characterID)
 	fields := []any{
 		"source", source,

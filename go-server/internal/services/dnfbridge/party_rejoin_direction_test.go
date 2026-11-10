@@ -41,8 +41,17 @@ func TestPartyJoinRequestKeepsExistingLeaderAndSlots(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, found := manager.SnapshotByUser(inviteAcceptLeaderCharacterID, 0)
-			if !found || got.ID != created.Party.ID || got.Leader != inviteAcceptLeaderCharacterID || len(got.Members) != 2 {
+			if !found || got.Leader != inviteAcceptLeaderCharacterID || len(got.Members) != 2 {
 				t.Fatalf("join reversed or replaced existing lobby: found=%t snapshot=%+v", found, got)
+			}
+			// 成员“先离开再加入”是重入路径：默认会重建一个新 party id，强制客户端
+			// 重置 P2P 会话；普通加入（未离开过）仍必须保留原 lobby id。
+			if retained && partyRejoinRebuildEnabled() {
+				if got.ID == created.Party.ID {
+					t.Fatalf("rejoin kept party id %d, want a rebuilt id", got.ID)
+				}
+			} else if got.ID != created.Party.ID {
+				t.Fatalf("join replaced existing lobby: got=%d want=%d", got.ID, created.Party.ID)
 			}
 			for _, m := range got.Members {
 				want := byte(0)

@@ -1090,6 +1090,22 @@ func (s *Service) handleOnlineResponsePeer(session *gameSession, typ uint16, bod
 	if result.AlreadyMember {
 		return s.sendRuntimePartyRosterRefresh(joiner, result.Party.StateFor(selectedCharacterID(joiner)), "party_invite_existing_member_confirmation")
 	}
+	// 同一个人离开后又加回**同一个 party id**：客户端缓存的 P2P 会话不会重置，
+	// 现场表现为老成员的新腿一个包都不发、重入方一直"连接中"，踢一个队员才好。
+	// 这里把整支队重建到新 party id，强制客户端重新握手（见 party_rejoin_rebuild.go）。
+	if partyRejoinRebuildEnabled() && s.departedFromPartyRecently(joiner.selectedCharacterID, uint16(state.PartyID)) {
+		oldPartyID := state.PartyID
+		if rebuilt, ok := s.rebuildRuntimePartyOnRejoin(oldPartyID, joiner.selectedCharacterID); ok {
+			state = rebuilt
+			s.logGameEvent(joiner, "game-party-rejoin-rebuilt-new-party-id",
+				"old_party_id", oldPartyID,
+				"new_party_id", state.PartyID,
+				"char_id", joiner.selectedCharacterID,
+				"leader_char_id", state.UserID,
+				"member_count", len(state.Members))
+		}
+	}
+	s.clearPartyDeparture(joiner.selectedCharacterID)
 	s.synchronizeOrdinaryPartyRaidGroups(state, "party_invite_accept")
 	if err := s.sendManagedRuntimePartySnapshots(state); err != nil {
 		return err

@@ -810,8 +810,15 @@ func (r *currentPartyUDPRelay) probeEndpointFor(characterID uint16, address [4]b
 }
 
 // seedEndpointFor 是"腿建立时能给这条腿的 owner 写死的目标"的取值顺序：
-//  1. 原生探针端点（本场/组队前该角色自己发到中继端口、且载荷解析出的角色 id 对得上）；
-//  2. 同角色端点备忘（本进程内该角色**自己发过**的真实端点）。
+//  1. **同角色已学到的真实 P2P 端点备忘**（新鲜，见 rememberEndpoint）；
+//  2. 原生探针端点（本场/组队前该角色自己发到中继端口、且载荷解析出的角色 id 对得上）；
+//  3. 同角色端点备忘（过期兜底）。
+//
+// 为什么 1 优先于 2：探针口只是客户端的**保活 socket**，不一定是游戏 P2P socket
+// （现场：探针源端口 6969，游戏 P2P 源端口 8278）。成员重入/新腿建立时，探针口
+// 往往比真实端点更新得更勤；旧顺序让新腿永远拿探针口当种子，包进不了游戏 socket，
+// 于是"老成员一条新腿都不发"的单向死锁一直存在。真实 P2P 端点来自同角色在别的
+// 腿（例如已打通的 1↔5）上发过的包，是当前真正能收包的端口。
 //
 // 方向：腿 (owner=O, peer=P) 的 socket 是广告给 O 的那个口，它的出向投递目标永远是 **O 自己**
 // （learnedEndpoint 就是 O 的源端点、pending 队列里也是要投给 O 的包）。所以这里的 characterID
@@ -822,10 +829,18 @@ func (r *currentPartyUDPRelay) seedEndpointFor(characterID uint16, address [4]by
 	if r == nil || characterID == 0 {
 		return nil
 	}
+	memo := r.lookupEndpointMemo(characterID)
+	if memo != nil {
+		if port, ok := memo.portForTTL(address, r.memoTTL); ok {
+			return &net.UDPAddr{
+				IP:   net.IPv4(address[0], address[1], address[2], address[3]),
+				Port: int(port),
+			}
+		}
+	}
 	if endpoint := r.probeEndpointFor(characterID, address); endpoint != nil {
 		return endpoint
 	}
-	memo := r.lookupEndpointMemo(characterID)
 	if memo == nil {
 		return nil
 	}
