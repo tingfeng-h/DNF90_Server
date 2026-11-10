@@ -324,6 +324,13 @@ type gameSession struct {
 	postFinishLoadingPlayerStateSent   bool
 	returnTownFinishLoadingAckOnly     bool
 	confirmedDungeonReturnStatePending bool
+	// fiendWarPartyClearOnTownSceneReady 记录"回城提交时这支遭遇战临时队伍被退役，
+	// 但本会话还没完成城镇场景重建"。那一刻 townActorOwnerChannel 仍是副本上下文 0，
+	// 退役的 op9 kind3 只会清掉副本记录；客户端城镇上下文（连接频道）里"自己"那条
+	// 队伍记录还在 ⇒ 队伍框一直残留。等 player-state-rebuilt 把 owner 落定后再补一条
+	// 同上下文的 kind3，见 flushFiendWarPartyClearOnTownSceneReady。
+	// guarded by dungeon.mu（与 confirmedDungeonReturnStatePending 同一把锁）。
+	fiendWarPartyClearOnTownSceneReady bool
 	selectorReturnPresence             *currentSelectorReturnPresence // guarded by dungeon.mu
 	initialTownRouteCharacterID        uint16
 	initialTownRouteStage              currentInitialTownRouteStage

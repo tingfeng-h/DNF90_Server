@@ -71,13 +71,19 @@ func (s *Service) retireCurrentFiendWarPartySnapshot(p *gameSession, frozen part
 	for _, member := range current.Members {
 		peer, online := s.onlineGameSessionCharacterSnapshot(member.UserID)
 		if !online || peer.generation != member.SessionGeneration {
+			s.logGameEvent(p, "game-fiendwar-retire-member-skip",
+				"char_id", member.UserID, "online", online,
+				"gen_match", online && peer.generation == member.SessionGeneration,
+				"expect_gen", member.SessionGeneration)
 			continue
 		}
+		s.logGameEvent(p, "game-fiendwar-retire-member-send", "char_id", member.UserID)
 		// Do not erase a new party created after this atomic retirement.
 		if _, replaced := manager.SnapshotByUser(member.UserID, 0); replaced {
 			continue
 		}
 		s.clearRuntimePartyProjection(member.UserID, peer.generation)
+		s.markFiendWarPartyClearOnTownSceneReady(peer.session)
 		if err := s.clearDisbandedDungeonPartyRecords(peer.session, current.StateFor(member.UserID).Members, current.Leader, false, "fiendwar_encounter_party_end"); err != nil {
 			s.logGameEvent(peer.session, "game-fiendwar-encounter-party-record-clear-failed", "party_id", current.ID, "run_id", runID, "error", err)
 		}
@@ -117,4 +123,52 @@ func (s *Service) currentFiendWarPartyStillInDungeon(self *gameSession, frozen p
 		}
 	}
 	return false
+}
+
+// markFiendWarPartyClearOnTownSceneReady 记录"这个成员在队伍退役时仍处于回城过场"。
+// 回城提交函数在调用退役前已经把 dungeon.runtime 摘掉、但 townActorOwnerChannel
+// 还是副本上下文 0（见 dungeon_return_town.go 的提交点注释）。此时发出的 op9 kind3
+// 只会命中"副本上下文"的那条记录，客户端城镇上下文里"自己"那条队伍记录不会被清，
+// 于是队伍框残留。标记后由 ensureCurrentConfirmedDungeonReturnPlayerState 在城镇
+// owner 落定、玩家状态重建完成后补发一次。
+func (s *Service) markFiendWarPartyClearOnTownSceneReady(session *gameSession) {
+	if session == nil {
+		return
+	}
+	session.dungeon.mu.Lock()
+	if session.confirmedDungeonReturnStatePending {
+		session.fiendWarPartyClearOnTownSceneReady = true
+	}
+	session.dungeon.mu.Unlock()
+}
+
+// flushFiendWarPartyClearOnTownSceneReady 在城镇场景重建完成后补一条"自己"的
+// op9 kind3（owner = 当前连接频道）。只有退役时确实还在过场的成员才会走到这里；
+// 若这期间已经加入了新队伍，则不动新队伍。
+func (s *Service) flushFiendWarPartyClearOnTownSceneReady(session *gameSession, source string) {
+	if session == nil {
+		return
+	}
+	session.dungeon.mu.Lock()
+	pending := session.fiendWarPartyClearOnTownSceneReady
+	session.fiendWarPartyClearOnTownSceneReady = false
+	session.dungeon.mu.Unlock()
+	if !pending {
+		return
+	}
+	if state := s.runtimePartyStateForSession(session); state.PartyID > 0 {
+		s.logGameEvent(session, "game-fiendwar-party-clear-town-ready-skipped",
+			"source", source, "char_id", session.selectedCharacterID, "party_id", state.PartyID,
+			"reason", "character_joined_a_new_party_during_the_return")
+		return
+	}
+	if err := s.sendRuntimePartyMemberRemoved(session, 0, alignedcmd.PartyState{}); err != nil {
+		s.logGameEvent(session, "game-fiendwar-party-clear-town-ready-failed",
+			"source", source, "char_id", session.selectedCharacterID, "error", err)
+		return
+	}
+	s.logGameEvent(session, "game-fiendwar-party-clear-town-ready",
+		"source", source, "char_id", session.selectedCharacterID,
+		"owner_channel", currentClientSelectedChannel(session),
+		"reason", "the_retire_frame_was_sent_before_the_town_context_was_ready")
 }

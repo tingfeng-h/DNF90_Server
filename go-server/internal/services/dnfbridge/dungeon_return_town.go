@@ -935,6 +935,14 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 	townID := runtime.townReturnTransition.TownID
 	areaID := runtime.townReturnTransition.AreaID
 	session.dungeon.mu.Unlock()
+	// 客户端已经发出自己的城镇侧场景请求（本次提交就是由它触发的），因此城镇
+	// 上下文就是连接频道；但 townActorOwnerChannel 此刻可能仍是副本 owner 0
+	// （见上面 omitSceneActivation 的注释）。遭遇战临时队伍退役的 op9 kind3
+	// 拿这个字段当记录上下文：0 只会清副本记录，客户端城镇上下文里"自己"那条
+	// 队伍记录会留下来，队伍框一直残留。提前落成与 ensure... 的 :1075 同一个来源。
+	session.townMu.Lock()
+	session.townActorOwnerChannel = returnOwnerChannel
+	session.townMu.Unlock()
 	if runtime.guildPractice != nil {
 		s.projectOptionalGuildEssenceSnapshot(session)
 	}
@@ -1110,6 +1118,9 @@ func (s *Service) ensureCurrentConfirmedDungeonReturnPlayerState(
 		session.confirmedDungeonReturnStatePending = false
 	}
 	session.dungeon.mu.Unlock()
+	// 遭遇战临时队伍在本次回城提交里退役、但退役帧发得比城镇上下文还早：
+	// 现在 owner 已落定、玩家状态已重建，补一条"自己"的 kind3 收口。
+	s.flushFiendWarPartyClearOnTownSceneReady(session, source+"_fiendwar_party_clear_after_town_ready")
 	if selectorReturn != nil {
 		if !s.restoreCurrentSelectorReturnPresence(session, selectorReturn, source) {
 			return nil

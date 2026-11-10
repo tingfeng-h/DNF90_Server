@@ -208,8 +208,20 @@ func (s *Service) disbandRuntimePartyOnDungeonLeaderExit(
 	online := make([]*gameSession, 0, len(members))
 	for _, member := range members {
 		identity, ok := s.onlineGameSessionCharacterSnapshot(member.UserID)
-		if !ok || identity.generation != beforeMemberGeneration(before, member.UserID) {
+		if !ok || identity.session == nil {
+			s.logGameEvent(session, "game-party-dungeon-leader-exit-member-offline",
+				"party_id", state.PartyID, "char_id", member.UserID, "leaving_char_id", leavingCharacterID)
 			continue
+		}
+		// 代次不同只说明该成员在离队前后重连过（切场景重连很常见）。
+		// 此前这里直接跳过，导致他收不到"队伍已解散"，客户端队伍框一直残留。
+		// 现在只把重连记进日志，解散帧照发给他当前这条会话。
+		snapshotGeneration := beforeMemberGeneration(before, member.UserID)
+		if identity.generation != snapshotGeneration {
+			s.logGameEvent(session, "game-party-dungeon-leader-exit-member-generation-changed",
+				"party_id", state.PartyID, "char_id", member.UserID,
+				"snapshot_generation", snapshotGeneration, "current_generation", identity.generation,
+				"leaving_char_id", leavingCharacterID)
 		}
 		s.clearRuntimePartyProjection(member.UserID, identity.generation)
 		online = append(online, identity.session)

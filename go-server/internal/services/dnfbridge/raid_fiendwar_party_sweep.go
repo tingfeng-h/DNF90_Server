@@ -84,6 +84,13 @@ func (s *Service) retireStaleFiendWarEncounterParties(p *gameSession) {
 				"reason", "never_entered_dungeon")
 			continue
 		}
+		// 退役要给每个成员各发一条 op9。若此刻有人不在线（切场景重连中），
+		// 那一侧的队伍框会残留 —— 所以等全员在线再退役，下一轮再试。
+		if missing, online := s.fiendWarPartyAllOnline(item.snapshot); !online {
+			s.logGameEvent(p, "game-fiendwar-party-sweep-skipped", "party_id", item.id,
+				"reason", "member_offline", "offline_char_id", missing)
+			continue
+		}
 		s.logGameEvent(p, "game-fiendwar-party-sweep-retire", "party_id", item.id, "run_id", item.runID)
 		s.retireCurrentFiendWarPartySnapshot(p, item.snapshot, item.runID)
 		s.fiendWarPartyMu.Lock()
@@ -120,4 +127,18 @@ func (s *Service) fiendWarPartyOccupancy(snapshot party.RuntimePartySnapshot) (b
 		}
 	}
 	return false, ""
+}
+
+// fiendWarPartyAllOnline 返回所有成员是否都在线；不在线时带回第一个离线角色 ID。
+func (s *Service) fiendWarPartyAllOnline(snapshot party.RuntimePartySnapshot) (uint16, bool) {
+	if s == nil {
+		return 0, false
+	}
+	for _, member := range snapshot.Members {
+		peer, online := s.onlineGameSessionCharacterSnapshot(member.UserID)
+		if !online || peer.session == nil {
+			return member.UserID, false
+		}
+	}
+	return 0, true
 }
