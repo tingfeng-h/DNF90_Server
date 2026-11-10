@@ -964,18 +964,6 @@ func (s *Service) releasePartyDungeonInstance(runtime *runtimeDungeonState, char
 	if source != "completed_run_retry" {
 		s.releaseCurrentRaidParticipation(runtime, characterID)
 	}
-	// 本函数是"离开副本运行时"的统一收口点。超时空遭遇战打完时该客户端是
-	// 切场景后重连，服务端不会经过回城提交点，退役只能在这里补。
-	encounterEntry := (*currentRaidDungeonEntry)(nil)
-	runStatus := worldmap.DungeonRunActive
-	haveRunStatus := false
-	if runtime != nil {
-		encounterEntry = runtime.raidEntry
-		if runtime.Session != nil {
-			runStatus = runtime.Session.Snapshot().Run.Status
-			haveRunStatus = true
-		}
-	}
 	if s == nil || runtime == nil || runtime.partyInstance == nil || characterID == 0 {
 		return
 	}
@@ -1024,9 +1012,6 @@ func (s *Service) releasePartyDungeonInstance(runtime *runtimeDungeonState, char
 			"dungeon_id", instance.key.DungeonID,
 			"reason", "last_member_left",
 			"source", source)
-	}
-	if encounterEntry != nil && encounterEntry.fiendWarParty != nil {
-		s.logReleasedFiendWarEncounterParty(characterID, encounterEntry, remaining, runStatus, haveRunStatus)
 	}
 }
 

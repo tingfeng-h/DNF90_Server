@@ -3,7 +3,6 @@ package dnfbridge
 import (
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 	"longheng.io/server/internal/modules/dnf/party"
-	"longheng.io/server/internal/modules/dnf/worldmap"
 )
 
 // A FiendWar encounter party ends on confirmed return. Raid membership and
@@ -118,29 +117,4 @@ func (s *Service) currentFiendWarPartyStillInDungeon(self *gameSession, frozen p
 		}
 	}
 	return false
-}
-
-
-// logReleasedFiendWarEncounterParty 观测"离开副本运行时"时遭遇战队伍的状态。
-// 先只记录不决策：确认该回调在客户端切场景重连时是否会被调用。
-func (s *Service) logReleasedFiendWarEncounterParty(leaving uint16, entry *currentRaidDungeonEntry, remaining int, runStatus worldmap.DungeonRunStatus, haveRun bool) {
-	if s == nil || entry == nil || entry.fiendWarParty == nil {
-		return
-	}
-	snapshot := *entry.fiendWarParty
-	var anchor *gameSession
-	if peer, ok := s.onlineGameSessionCharacterSnapshot(leaving); ok && peer.session != nil {
-		anchor = peer.session
-	} else {
-		for _, member := range snapshot.Members {
-			if peer, online := s.onlineGameSessionCharacterSnapshot(member.UserID); online && peer.session != nil {
-				anchor = peer.session
-				break
-			}
-		}
-	}
-	s.logGameEvent(anchor, "game-fiendwar-release-observed",
-		"char_id", leaving, "party_id", snapshot.ID, "run_id", entry.RunID,
-		"remaining", remaining, "run_status", runStatus, "have_run", haveRun,
-		"others_in_dungeon", s.currentFiendWarPartyStillInDungeon(anchor, snapshot, entry.RunID))
 }
