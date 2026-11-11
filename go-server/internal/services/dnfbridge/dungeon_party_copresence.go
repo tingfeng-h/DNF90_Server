@@ -122,9 +122,6 @@ func (s *Service) recordDungeonPartyRunKey(session *gameSession, runtime *runtim
 	}
 	session.dungeonPartyRun = key
 	session.dungeonPartyRunValid = true
-	// 标记本角色已进入组队副本（客户端将持有 owner=0 的副本队伍记录），
-	// 等真正离开副本回到城镇时由 consumeDungeonPartyAliasRetirePending 一次性退役。
-	session.dungeonPartyAliasRetireCharID = session.selectedCharacterID
 	if session.dungeonPeerProjected == nil {
 		session.dungeonPeerProjected = make(map[uint16]boundGameSessionCharacter, 4)
 	}

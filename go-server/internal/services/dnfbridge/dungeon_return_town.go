@@ -730,11 +730,10 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// 两个人回城后互相看不见。默认档登记城镇同屏 + 作废本会话的副本运行键；
 		// 回退档一个字段都不改。见 dungeon_party_completion_return_town_presence.go。
 		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
-		// 通关回城（op72 / completed_town_route）在第 724 行调 settleRuntimePartyOnDungeonCompletionReturn
-		// 时本会话的 publishCompletedDungeonReturnTownPresence 尚未执行（townSceneReadyCharacterID 为 0），
-		// 因此最后一个回城成员必须在 publish 之后触发一次全队同屏与队伍投影重建。
-		// 重复调用由 rebuildRuntimePartyTownCoPresenceAfterReturn 内部的世代签名严格幂等拦截，
-		// 别名退役也由 dungeonPartyAliasRetireCharID 一次性消费，不会随 op35/op15 刷屏。
+		// publishCompletedDungeonReturnTownPresence 刚刚把本会话的 townSceneReadyCharacterID
+		// 与 townPositionSnapshot 置为就绪；在此之前（第 724 行）调用的
+		// rebuildRuntimePartyTownCoPresenceAfterReturn 必然因本会话尚未 ready 而早退。
+		// 因此无论队伍是 1 人还是多人，都在登记完城镇存在后再触发一次同屏与队伍投影重建。
 		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 1 {
 			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_party_town_restore_after_presence"); err != nil {
 				return err
