@@ -77,10 +77,15 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		ordered = append(ordered, receiver.selectedCharacterID)
 	}
 
+	// 只退役副本作用域（owner = 0）。
+	//
+	// 曾经把 owner = channel 也一起退役，结果是每次"回城镇"（含从地下城选图界面
+	// 返回、op35 position、op15 scene finalizer）都会把城镇里**活着的**那条队伍
+	// 记录用 kind3 清掉，紧接着 sendRuntimePartyRosterLocal 又补一遍，客户端表现
+	// 为：响组队成功音效、队员血条变"连接中"、过一会儿才恢复——即队伍被拆了重建。
+	// 城镇作用域的记录只有在真的离队时才该由 sendRuntimePartyDeparture 退役，
+	// 这里不能碰。
 	owners := []byte{currentSceneObjectContext}
-	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
-		owners = append(owners, channel)
-	}
 
 	retire := func(characterID uint16, owner byte) error {
 		objectKey := currentSceneActorObjectKey(characterID)
