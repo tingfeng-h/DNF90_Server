@@ -304,6 +304,18 @@ func (m *RuntimePartyManager) leaveLocked(userID uint16, generation uint64, allo
 		return result
 	}
 
+	// 单变量实验（默认 off）：同 partyId 转让，保住幸存两人的中继端口。
+	if leaderLeaveSameID() {
+		members := party.membersBySlot()
+		if len(members) > 0 {
+			party.leader = members[0].UserID
+		}
+		result := runtimePartySuccess(party, userID)
+		result.Previous = &previousCopy
+		result.LeaderMoved = true
+		return result
+	}
+
 	// The current client cannot safely consume a same-id leader replacement.
 	// Retire the generation and rebuild surviving members under a new id. The
 	// successor keeps its fixed slot; leadership is carried by Leader/UserID and
