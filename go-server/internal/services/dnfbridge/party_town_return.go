@@ -41,17 +41,12 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 		sessions = append(sessions, memberSession)
 	}
 
-	rebuildSig, claimed := claimPartyTownReturnRebuild(state, sessions)
-	if !claimed {
-		return nil
-	}
-
 	for _, receiver := range sessions {
 		receiverChannelID := currentTownPresenceChannelID(receiver)
-		aliasRetired, err := s.retireDungeonPartyAliasRecordsIfPending(receiver, members, source)
-		if err != nil {
-			releasePartyTownReturnRebuild(sessions, rebuildSig)
-			return err
+		if bug1RetireDungeonPartyAliasesEnabled() {
+			if err := s.retireDungeonPartyAliasRecords(receiver, members, source); err != nil {
+				return err
+			}
 		}
 		for _, member := range members {
 			if member.UserID == receiver.selectedCharacterID {
@@ -59,7 +54,6 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			}
 			actor, found := s.onlinePlayers.PlayerForCharacter(member.UserID)
 			if !found || actor.Session == nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
 				return fmt.Errorf("party return peer %d has no town actor", member.UserID)
 			}
 			// 频道隔离（彻底隔离口径）：跨频道队友一律不投影（op23 没有频道字段，
@@ -70,11 +64,10 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			if s.townPrivateRoomPeerProjectionBlocked(receiver, actor) {
 				continue
 			}
-			if !aliasRetired && s.onlinePlayers.PeerInSameArea(receiver.selectedCharacterID, member.UserID) {
+			if s.onlinePlayers.PeerInSameArea(receiver.selectedCharacterID, member.UserID) {
 				continue
 			}
 			if err := s.sendTownRemoteActorState(receiver, actor, source+"_party_peer_actor"); err != nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
 				return err
 			}
 			areaBody := buildCurrentTownUserAreaNotificationBody(
@@ -92,48 +85,30 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 				areaBody,
 				source+"_party_peer_area",
 			); err != nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
 				return err
 			}
 		}
-		receiverState := stateForRuntimePartyReceiver(state, receiver.selectedCharacterID)
 		if len(members) == 1 {
 			// The generic roster helper deliberately omits realtime packets for
 			// single-member formation. A completed town return needs the actor
 			// state restored, so this path uses the established nonempty realtime body
 			// before restoring its actor frame. Keep formation behavior unchanged.
 			if err := s.sendGameUpperRawClassCodec(receiver, 0x0099, runtimePartyRealtimeInfoBody(state), 0, true); err != nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
 				return err
 			}
-			if _, err := s.sendCurrentPartyActorFrameProjection(receiver, receiver, receiverState, source+"_party_roster"); err != nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
+			if _, err := s.sendCurrentPartyActorFrameProjection(receiver, receiver, stateForRuntimePartyReceiver(state, receiver.selectedCharacterID), source+"_party_roster"); err != nil {
 				return err
-			}
-			if aliasRetired {
-				if err := s.sendGameUpperRawClassCodec(receiver, 0x0099, runtimePartyRealtimeInfoBody(state), 0, true); err != nil {
-					releasePartyTownReturnRebuild(sessions, rebuildSig)
-					return err
-				}
 			}
 			continue
 		}
-		if err := s.sendRuntimePartyRosterLocal(receiver, receiverState, source+"_party_roster"); err != nil {
-			releasePartyTownReturnRebuild(sessions, rebuildSig)
+		if err := s.sendRuntimePartyRosterLocal(receiver, stateForRuntimePartyReceiver(state, receiver.selectedCharacterID), source+"_party_roster"); err != nil {
 			return err
-		}
-		if aliasRetired {
-			if err := s.sendRuntimePartyRealtimeInfoLocal(receiver, receiverState); err != nil {
-				releasePartyTownReturnRebuild(sessions, rebuildSig)
-				return err
-			}
 		}
 	}
 	s.logGameEvent(session, "game-party-town-return-copresence-rebuilt",
 		"source", source,
 		"party_id", state.PartyID,
 		"member_count", len(members),
-		"rebuild_sig", rebuildSig,
 		"reason", "all_same_party_members_consumed_op132_scene_finalizer_then_mode0_mode1_op9_op23_and_realtime_roster")
 	return nil
 }

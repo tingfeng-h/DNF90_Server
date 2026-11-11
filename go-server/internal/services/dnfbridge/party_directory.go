@@ -201,12 +201,7 @@ func (s *Service) detachRuntimePartySession(session *gameSession, source string)
 	}
 	identity, bound := s.boundGameSessionCharacterSnapshot(session)
 	if !bound {
-		if (source == "channel_exit" || source == "return_select_character") && s.liveGameSessionRegistered(session) {
-			identity, bound = s.onlineGameSessionCharacterSnapshot(session.selectedCharacterID)
-		}
-		if !bound {
-			return
-		}
+		return
 	}
 	state := runtimePartyStateSnapshot(session)
 	before, managed := s.runtimePartyManagerForService().SnapshotByUser(identity.character, 0)
@@ -246,14 +241,9 @@ func (s *Service) detachRuntimePartySession(session *gameSession, source string)
 	if !removed && result.Reason == "stale_session" && s.partyLeaveRepair() == partyLeaveRepairOn {
 		nextState, result, removed = s.repairManagedRuntimePartyLeave(identity)
 	}
-	storeRuntimePartyState(session, alignedcmd.PartyState{})
 	if !removed {
+		storeRuntimePartyState(session, alignedcmd.PartyState{})
 		return
-	}
-	// 主动切换频道（channel_exit）时客户端进程不退出：必须在回 op3 ACK 之前把本人客户端里的
-	// 0x56A3768 与 owner=0/channel 队伍记录用 kind3 清掉，防止切到新频道后残留旧队伍槽位。
-	if source == "channel_exit" && s.options.currentClientVersion == "official-24.9" {
-		_ = s.sendRuntimePartyDeparture(session, state)
 	}
 	s.notifyRuntimePartySelectionDeparture(session, result, source)
 	if result.Retired != nil {
@@ -262,23 +252,11 @@ func (s *Service) detachRuntimePartySession(session *gameSession, source string)
 			if member.UserID == identity.character {
 				continue
 			}
-			if nextState.PartyID <= 0 {
-				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
-			}
 			if target, online := s.onlineGameSession(member.UserID); online {
-				if nextState.PartyID <= 0 {
-					if err := s.sendRuntimePartyDeparture(target, result.Retired.StateFor(member.UserID)); err != nil {
-						s.logWarn("dnfbridge deferred retired party departure during session detach", "source", source, "char_id", identity.character, "error", err)
-					}
-				} else {
-					if err := s.sendRuntimePartySnapshot(target, alignedcmd.PartyState{}); err != nil {
-						s.logWarn("dnfbridge deferred retired party clear during session detach", "source", source, "char_id", identity.character, "error", err)
-					}
+				if err := s.sendRuntimePartySnapshot(target, alignedcmd.PartyState{}); err != nil {
+					s.logWarn("dnfbridge deferred retired party clear during session detach", "source", source, "char_id", identity.character, "error", err)
 				}
 			}
-		}
-		if nextState.PartyID <= 0 {
-			return
 		}
 		s.syncRuntimePartyUDPRelay(nextState)
 		if err := s.sendManagedRuntimePartySnapshots(nextState); err != nil {

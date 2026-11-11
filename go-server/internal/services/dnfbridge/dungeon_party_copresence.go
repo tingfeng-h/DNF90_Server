@@ -122,7 +122,6 @@ func (s *Service) recordDungeonPartyRunKey(session *gameSession, runtime *runtim
 	}
 	session.dungeonPartyRun = key
 	session.dungeonPartyRunValid = true
-	session.dungeonPartyAliasRetireCharID = session.selectedCharacterID
 	if session.dungeonPeerProjected == nil {
 		session.dungeonPeerProjected = make(map[uint16]boundGameSessionCharacter, 4)
 	}
