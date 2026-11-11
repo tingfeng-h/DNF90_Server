@@ -43,6 +43,11 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 
 	for _, receiver := range sessions {
 		receiverChannelID := currentTownPresenceChannelID(receiver)
+		if bug1RetireDungeonPartyAliasesEnabled() {
+			if err := s.retireDungeonPartyAliasRecords(receiver, members, source); err != nil {
+				return err
+			}
+		}
 		for _, member := range members {
 			if member.UserID == receiver.selectedCharacterID {
 				continue
