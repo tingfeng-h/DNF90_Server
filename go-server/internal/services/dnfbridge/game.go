@@ -411,14 +411,19 @@ type gameSession struct {
 	// dungeonPartyRun 记录"这一场副本"的运行键（队伍 + 副本 + 迷宫 + 房间 + 地图 + 种子），
 	// 用于给队友 actor 同屏投影把关；per-session 运行时下它是唯一的"同一场"判据。
 	// 详见 dungeon_party_copresence.go。
-	dungeonPartyRunMu    sync.Mutex
-	dungeonPartyRun      dungeonPartyRunKey
-	dungeonPartyRunValid bool
-	dungeonPeerProjected map[uint16]boundGameSessionCharacter
+	dungeonPartyRunMu             sync.Mutex
+	dungeonPartyRun               dungeonPartyRunKey
+	dungeonPartyRunValid          bool
+	dungeonPartyAliasRetireCharID uint16
+	dungeonPeerProjected          map[uint16]boundGameSessionCharacter
 	// dungeonOwnerOverrideLogged 是 DNFBRIDGE_PARTY_DUNGEON_OWNER_MODE=channel 时
 	// "owner 覆盖"单次日志的去重集合（键 = 队友 actor object_key）。与 dungeonPartyRun
 	// 共用 dungeonPartyRunMu，换场时一起清空；默认 zero 时始终为空。
 	dungeonOwnerOverrideLogged map[uint16]bool
+	// partyTownReturnRebuildMu 保护 lastPartyTownReturnRebuildSig，保证同一次
+	// 副本/选择器→城镇转换世代对同一支队伍最多只执行一次 rebuildRuntimePartyTownCoPresenceAfterReturn。
+	partyTownReturnRebuildMu      sync.Mutex
+	lastPartyTownReturnRebuildSig string
 	townMu                     sync.Mutex
 	// Records ordinary town peers that received the opt-in display-only form.
 	// This lock never spans repository work, packet writes or other locks.

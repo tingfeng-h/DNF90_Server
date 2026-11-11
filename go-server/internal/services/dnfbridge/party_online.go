@@ -448,6 +448,22 @@ func (s *Service) repairManagedRuntimePartyLeave(identity boundGameSessionCharac
 	s.logRuntimePartyMembershipRemoved("leave_repair_by_character", identity.character, identity.generation, before, result)
 	s.clearRuntimePartyProjection(identity.character, identity.generation)
 	if result.Disbanded || result.Party.ID == 0 {
+		memberIDs := make([]uint16, 0, len(before.Members))
+		for _, member := range before.Members {
+			if member.UserID == 0 {
+				continue
+			}
+			memberIDs = append(memberIDs, member.UserID)
+			if member.UserID != identity.character {
+				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			}
+		}
+		if before.ID != 0 {
+			s.recyclePartyDungeonInstances(int(before.ID), "party_disbanded")
+			if dungeonPartyRunKeyTownResetEnabled() {
+				s.forgetRuntimePartyRunKeysOnDisband(memberIDs, before.ID, "leave_repair_by_character")
+			}
+		}
 		return alignedcmd.PartyState{}, result, true
 	}
 	return s.publishRuntimePartyMembershipSnapshot(result.Party), result, true

@@ -414,6 +414,26 @@ func (s *Service) reconcileManagedPriorPartyLeave(prior *party.RuntimePartyResul
 	s.logRuntimePartyMembershipRemoved("prior_party_leave_on_join_or_create", movedUser, 0, previous, *prior)
 	if prior.Disbanded || prior.Party.ID == 0 {
 		s.closeRuntimePartyUDPRelay(int(previous.ID))
+		s.recyclePartyDungeonInstances(int(previous.ID), "party_disbanded")
+		memberIDs := make([]uint16, 0, len(previous.Members))
+		for _, member := range previous.Members {
+			if member.UserID == 0 {
+				continue
+			}
+			memberIDs = append(memberIDs, member.UserID)
+			if member.UserID == movedUser {
+				continue
+			}
+			s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			if session, online := s.onlineGameSession(member.UserID); online && session != nil {
+				if err := s.sendRuntimePartyDeparture(session, previous.StateFor(member.UserID)); err != nil {
+					return err
+				}
+			}
+		}
+		if dungeonPartyRunKeyTownResetEnabled() {
+			s.forgetRuntimePartyRunKeysOnDisband(memberIDs, previous.ID, "prior_party_leave_on_join_or_create")
+		}
 		return nil
 	}
 	nextState := s.publishRuntimePartyMembershipSnapshot(prior.Party)
@@ -567,6 +587,22 @@ func (s *Service) leaveManagedRuntimeParty(identity boundGameSessionCharacter, s
 	s.logRuntimePartyMembershipRemoved(source, identity.character, identity.generation, before, result)
 	s.clearRuntimePartyProjection(identity.character, identity.generation)
 	if result.Disbanded || result.Party.ID == 0 {
+		memberIDs := make([]uint16, 0, len(before.Members))
+		for _, member := range before.Members {
+			if member.UserID == 0 {
+				continue
+			}
+			memberIDs = append(memberIDs, member.UserID)
+			if member.UserID != identity.character {
+				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			}
+		}
+		if before.ID != 0 {
+			s.recyclePartyDungeonInstances(int(before.ID), "party_disbanded")
+			if dungeonPartyRunKeyTownResetEnabled() {
+				s.forgetRuntimePartyRunKeysOnDisband(memberIDs, before.ID, source)
+			}
+		}
 		return alignedcmd.PartyState{}, result, true
 	}
 	return s.publishRuntimePartyMembershipSnapshot(result.Party), result, true
