@@ -2,15 +2,9 @@ package dnfbridge
 
 import (
 	"fmt"
-	"strings"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 )
-
-func shouldRetireDungeonPartyAliasesOnTownRebuild(source string) bool {
-	return strings.HasSuffix(source, "_party_town_copresence_after_completed_return") ||
-		strings.HasSuffix(source, "_party_town_restore_after_presence")
-}
 
 // rebuildRuntimePartyTownCoPresenceAfterReturn restores the scene-owned town
 // actors only after every same-area party member has consumed its own op132
@@ -47,14 +41,8 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 		sessions = append(sessions, memberSession)
 	}
 
-	retireAliases := bug1RetireDungeonPartyAliasesEnabled() && shouldRetireDungeonPartyAliasesOnTownRebuild(source)
 	for _, receiver := range sessions {
 		receiverChannelID := currentTownPresenceChannelID(receiver)
-		if retireAliases {
-			if err := s.retireDungeonPartyAliasRecords(receiver, members, source); err != nil {
-				return err
-			}
-		}
 		for _, member := range members {
 			if member.UserID == receiver.selectedCharacterID {
 				continue

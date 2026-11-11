@@ -146,6 +146,7 @@ func (s *Service) publishCompletedDungeonReturnTownPresence(
 		return false
 	}
 	// 既有收口点：出副本回城不会走 SET_USER_AREA，必须在这里重新登记城镇同屏。
+	armDungeonReturnAliasRetirePending(session)
 	s.rebindTownCopresenceAfterDungeonReturn(
 		session,
 		transition.TownID,

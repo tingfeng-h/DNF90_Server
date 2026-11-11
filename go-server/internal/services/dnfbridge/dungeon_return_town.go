@@ -730,11 +730,10 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// 两个人回城后互相看不见。默认档登记城镇同屏 + 作废本会话的副本运行键；
 		// 回退档一个字段都不改。见 dungeon_party_completion_return_town_presence.go。
 		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
-		// publishCompletedDungeonReturnTownPresence 刚刚把本会话的 townSceneReadyCharacterID
-		// 与 townPositionSnapshot 置为就绪；在此之前（第 724 行）调用的
-		// rebuildRuntimePartyTownCoPresenceAfterReturn 必然因本会话尚未 ready 而早退。
-		// 因此无论队伍是 1 人还是多人，都在登记完城镇存在后再触发一次同屏与队伍投影重建。
-		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 1 {
+		// 多人队伍的同屏与队伍绑定统一由 rebindTownCopresenceAfterDungeonReturn 在全员到位时
+		// 一次性完成，这里不再二次重建（二次重建会在 [town_local_actor+0x4C8] 已绑定时再发
+		// kind3，触发客户端 0x201786B 解散分支，表现为"先解散再重组"）。
+		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) == 1 {
 			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_party_town_restore_after_presence"); err != nil {
 				return err
 			}
@@ -1017,6 +1016,7 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 		"reason", "client_town_side_scene_request_confirmed_transition")
 	// 副本返回城镇不会走 SET_USER_AREA，因此必须在这里重新登记城镇同屏，
 	// 否则服务端仍以为玩家在副本区域，同屏广播不会发生（出图后互相看不见）。
+	armDungeonReturnAliasRetirePending(session)
 	s.rebindTownCopresenceAfterDungeonReturn(session, townID, areaID, source+"_copresence_rebind")
 	return s.ensureCurrentConfirmedDungeonReturnPlayerState(
 		session,

@@ -219,6 +219,10 @@ type gameSession struct {
 	// 见 handleOnlineChangePartyHost 的幂等分支。
 	lastPublishedPartyLeader uint16
 	lastPublishedPartyID     int
+	// dungeonReturnAliasRetirePending 标记本会话刚从副本回到城镇，需要在全体同频道队友
+	// 均已离开副本并建立城镇 actor 后、首次下发 sendRuntimePartyRosterLocal 之前（此时
+	// [town_local_actor+0x4C8] == 0），精确执行一次 retireDungeonPartyAliasRecords。
+	dungeonReturnAliasRetirePending uint32
 	// dungeonPeerActorResent 是"副本内队友 actor 补发"的幂等表（键 = 房间 + 地图 + party）。
 	// 只在 session.dungeonPartyRunMu 下读写，见 dungeon_party_peer_actor_resend.go。
 	dungeonPeerActorResent map[dungeonPeerActorResendKey]bool

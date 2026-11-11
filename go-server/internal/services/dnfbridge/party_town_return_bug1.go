@@ -3,6 +3,7 @@ package dnfbridge
 import (
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 	"longheng.io/server/internal/modules/dnf/dnfenum"
@@ -23,19 +24,58 @@ func bug1RetireDungeonPartyAliasesEnabled() bool {
 	}
 }
 
-// retireDungeonPartyAliasRecords 在回城后重建城镇组队投影（sendRuntimePartyRosterLocal）之前，
-// 把副本作用域（owner = 0）与城镇作用域（owner = channel）的旧 op9 记录逐条用 kind3 退役：
+func armDungeonReturnAliasRetirePending(session *gameSession) {
+	if session == nil {
+		return
+	}
+	atomic.StoreUint32(&session.dungeonReturnAliasRetirePending, 1)
+}
+
+func consumeDungeonReturnAliasRetirePending(session *gameSession) bool {
+	if session == nil {
+		return false
+	}
+	return atomic.CompareAndSwapUint32(&session.dungeonReturnAliasRetirePending, 1, 0)
+}
+
+// allSameChannelPartyMembersOutsideDungeon 判断当前队伍中所有在线且同频道的成员是否都已经脱离副本运行时。
+// 只有当同频道队友全部回到城镇（彼此的 town actor 已通过 broadcastTownPlayerEnter 创建完毕）时，
+// 才在 [town_local_actor+0x4C8] == 0 的状态下执行一次 retireDungeonPartyAliasRecords + sendRuntimePartyRosterLocal，
+// 避免先回城的成员提前绑定 [town_local_actor+0x4C8] 后再被二次 kind3 触发 0x201786B 队伍解散。
+func (s *Service) allSameChannelPartyMembersOutsideDungeon(receiver *gameSession, state alignedcmd.PartyState) bool {
+	if s == nil || receiver == nil {
+		return false
+	}
+	members := runtimePartyMembers(state)
+	if len(members) <= 1 {
+		return true
+	}
+	receiverChannelID := currentTownPresenceChannelID(receiver)
+	for _, member := range members {
+		if member.UserID == 0 || member.UserID == receiver.selectedCharacterID {
+			continue
+		}
+		memberSession, online := s.onlineGameSession(member.UserID)
+		if !online || memberSession == nil {
+			continue
+		}
+		if currentTownPresenceChannelID(memberSession) != receiverChannelID {
+			continue
+		}
+		memberSession.dungeon.mu.Lock()
+		inDungeon := memberSession.dungeon.runtime != nil || memberSession.confirmedDungeonReturnStatePending
+		memberSession.dungeon.mu.Unlock()
+		if inDungeon {
+			return false
+		}
+	}
+	return true
+}
+
+// retireDungeonPartyAliasRecords 在回城后首次重建城镇组队投影（sendRuntimePartyRosterLocal）之前，
+// 趁 [town_local_actor+0x4C8] 仍为 0（before==0 && after==0，不会触发 0x201786B 队伍解散），
+// 把副本作用域（owner = 0）与城镇作用域（owner = channel）的旧 op9 记录逐条用 kind3 静默清槽：
 // **先同屏非本队单人角色（如图内已退队者）、再本队队友、最后自己**。
-//
-// 为什么必须同时退役 owner = 0 与 owner = channel：
-//  1. 图内 3->2 时 sendMemberGiveupSurvivorRosterAfterDeparture 已经把 record(self, channel)
-//     的槽位写成了幸存者名单 [1, 5]，并把退队者的 retainedRecordID=departingID (owner=0/channel)
-//     也写成了 [1, 5]。
-//  2. 回城 op24 重建城镇角色后，0x56A3768+0x48 (manager.slotActors) 中的旧副本角色指针已失效。
-//  3. 若不先把 record(self, channel) 与别名记录用 kind3 退役，紧接着的 sendRuntimePartyRosterLocal
-//     在客户端 0x29733B0 (0x29733E0) 会因 old_uid == new_uid 直接早退，且当 [local_actor+0x4C8]
-//     仍指向其它记录时 0x2017844 (before==0 && after==0) 会整条跳过 0x2017F95 (0x2977AB0 SetSlotActor)，
-//     导致队长的 0x29748E0 (CanInvite) 返回 0，右键退队者不出现"邀请组队"菜单项。
 func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members []alignedcmd.PartyMemberState, source string) error {
 	if s == nil || receiver == nil || receiver.selectedCharacterID == 0 {
 		return nil
@@ -114,6 +154,6 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		"retired_peers", len(ordered)-1,
 		"owner_channel", currentSceneObjectContext,
 		"switch", bug1RetireDungeonPartyAliasesEnv,
-		"reason", "kind3_owner0_and_channel_peers_then_self_before_town_self_record")
+		"reason", "kind3_owner0_and_channel_peers_then_self_while_town_actor_unlinked")
 	return nil
 }
