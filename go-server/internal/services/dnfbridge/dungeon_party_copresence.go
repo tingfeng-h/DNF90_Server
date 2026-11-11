@@ -87,6 +87,12 @@ func (s *Service) recordDungeonPartyRunKey(session *gameSession, runtime *runtim
 		return
 	}
 	key, ok := dungeonPartyRunKeyFrom(session, runtime, scene)
+	// 落位同时把这间房的权威 Seed 登记到共享实例，供退队校验判断"这个 Seed
+	// 是不是本局过图产生的"。放在 dungeonPartyRunMu 之外取 instance.mu，
+	// 保持 session.dungeon.mu → instance.mu 的既有锁序。
+	if ok {
+		notePartyDungeonInstanceRoomSeed(runtime, scene)
+	}
 	session.dungeonPartyRunMu.Lock()
 	if !ok {
 		session.dungeonPartyRun = dungeonPartyRunKey{}
