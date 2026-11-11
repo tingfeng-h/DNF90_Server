@@ -87,14 +87,14 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		return nil
 	}
 	route := s.currentSceneActorRoute()
-	retire := func(characterID uint16) error {
+	retire := func(characterID uint16, owner byte) error {
 		objectKey := currentSceneActorObjectKey(characterID)
 		if objectKey == 0 {
 			return nil
 		}
 		body := buildCurrentSceneOp9ActorRemovalBodyInContext(
 			objectKey,
-			currentSceneObjectContext,
+			owner,
 			route,
 		)
 		return s.sendGameUpperRawClass(
@@ -105,19 +105,64 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		)
 	}
 	retiredPeers := 0
+	// ordered = 同屏已退队的单人角色 -> 本队队友 -> 自己
+	ordered := make([]uint16, 0, len(members)+2)
+	seen := make(map[uint16]bool, len(members)+2)
 	for _, member := range members {
-		if member.UserID == receiver.selectedCharacterID {
+		if member.UserID != 0 {
+			seen[member.UserID] = true
+		}
+	}
+	// 先退役"同屏里已经不属于本队的单人角色"——典型就是图内退队后自己回城的那位。
+	// 他早就不在 members 里，但存活者的客户端上仍保留着他那条 op9 记录，
+	// 客户端据此认为对方"在队伍中"，右键时不提供"邀请组队"。
+	// 这一步只发生在本次出图的一次性消费里，不会随城镇事件重复。
+	if s.onlinePlayers != nil {
+		for _, peer := range s.onlinePlayers.PeersInSameArea(receiver.selectedCharacterID) {
+			if peer.CharacterID == 0 || seen[peer.CharacterID] {
+				continue
+			}
+			if peer.Session != nil {
+				if s.townCopresenceActorPartyState(peer.Session).PartyID > 0 {
+					continue
+				}
+			}
+			seen[peer.CharacterID] = true
+			ordered = append(ordered, peer.CharacterID)
+		}
+	}
+	for _, member := range members {
+		if member.UserID == receiver.selectedCharacterID || seen[member.UserID] {
 			continue
 		}
-		if err := retire(member.UserID); err != nil {
-			return err
-		}
+		seen[member.UserID] = true
+		ordered = append(ordered, member.UserID)
 		retiredPeers++
 	}
 	// Self last: the immediately following town roster must be the record the
 	// client ends up bound to.
-	if err := retire(receiver.selectedCharacterID); err != nil {
-		return err
+	if !seen[receiver.selectedCharacterID] {
+		seen[receiver.selectedCharacterID] = true
+		ordered = append(ordered, receiver.selectedCharacterID)
+	}
+	// owner=0（副本作用域）与 owner=channel（城镇作用域）都要退役：
+	// 客户端只在 kind3 的 (objectKey, owner) 与 [local_actor+0x4C8] 指向的记录
+	// 完全一致时才走 NOTI9 的退队清场。图内收到的队友别名会把绑定改到副本作用域，
+	// 回城后的 R_self 在城镇作用域；两边都清掉，R_self 才落得进去，
+	// 否则客户端会误入"首次入队"分支、调 ResetAllPeerConnections 把 UDP 抹掉，
+	// 再拉人时卡"连接中"并最终爆防火墙错误。
+	// 注意：这段只在一次性消费（每次真出图一次）里执行，历史上它造成刷屏是因为
+	// 当时挂在可重入的回城路径上反复调用。
+	owners := []byte{currentSceneObjectContext}
+	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
+		owners = append(owners, channel)
+	}
+	for _, owner := range owners {
+		for _, charID := range ordered {
+			if err := retire(charID, owner); err != nil {
+				return err
+			}
+		}
 	}
 	s.logGameEvent(receiver, "game-party-town-return-dungeon-alias-retired",
 		"source", source,
