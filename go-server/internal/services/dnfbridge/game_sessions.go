@@ -61,6 +61,13 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 	residentParty := alignedcmd.PartyState{}
 	if s.onlinePlayers != nil {
 		resident = s.onlinePlayers.SessionForCharacter(charID)
+		// 只有未执行频道退出、且与新连接处于同一频道的常驻连接，才允许作为同角色主连接继承队伍；
+		// 否则它只是正在退出的旧频道连接，新连接不能因此早退、也不能继承它的队伍。
+		if resident != nil && resident != session &&
+			(resident.channelExitAcknowledged ||
+				(session.channel.ID != 0 && resident.channel.ID != 0 && resident.channel.ID != session.channel.ID)) {
+			resident = nil
+		}
 		if resident != nil && resident != session && session.channelReconnect {
 			// A channel-reconnect session binds before its op13 inventory
 			// bootstrap. Settle and stop the resident clock synchronously here,
@@ -116,6 +123,9 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 		}
 	}
 	s.gameSessions[charID] = session
+	if previous != nil && previous != session && (previous.channelExitAcknowledged || previous.channel.ID != session.channel.ID) {
+		storeRuntimePartyState(session, alignedcmd.PartyState{})
+	}
 	if previous != nil && previous != session {
 		s.clearCurrentPeerProfileReferencesLocked(previous)
 	}
@@ -126,7 +136,12 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 	if previous != nil && previous != session {
 		s.closeCurrentGuildCreateSession(previous)
 		s.closeCurrentPVPSession(previous)
-		s.rebindManagedRuntimePartySession(previous, session)
+		if !previous.channelExitAcknowledged && previous.channel.ID == session.channel.ID {
+			s.rebindManagedRuntimePartySession(previous, session)
+		} else {
+			storeRuntimePartyState(previous, alignedcmd.PartyState{})
+			storeRuntimePartyState(session, alignedcmd.PartyState{})
+		}
 	}
 	s.restoreCurrentRaidPresence(session)
 }
@@ -302,6 +317,14 @@ func (s *Service) liveSameCharacterSessions(characterID uint16, exclude *gameSes
 			continue
 		}
 		if session.selectedCharacterID != characterID {
+			continue
+		}
+		// 已执行频道退出的旧连接、以及与 exclude 不在同一频道的会话，都不能作为交接对象，
+		// 否则旧频道 socket 关闭时会通过 handoverRuntimePartyToLiveSession 把队伍跨频道移交。
+		if session.channelExitAcknowledged {
+			continue
+		}
+		if exclude != nil && exclude.channel.ID != 0 && session.channel.ID != 0 && session.channel.ID != exclude.channel.ID {
 			continue
 		}
 		others = append(others, session)

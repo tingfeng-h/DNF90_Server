@@ -333,6 +333,11 @@ func (s *Service) sendSelectedActorMode0AppearanceWithBuffPolicy(session *gameSe
 	if err != nil {
 		return false, err
 	}
+	if !s.sessionHasActiveDungeonRuntime(session) && !isCurrentFiendWarChannel(session) {
+		if state := s.townCopresenceActorPartyState(session); state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
+			_ = projectCurrentTownPartyHPIntoMode0(mode0Body, runtimePartyRealtimeInfoBody(state), charID)
+		}
+	}
 	if current != nil && !current() {
 		return false, nil
 	}

@@ -448,6 +448,18 @@ func (s *Service) repairManagedRuntimePartyLeave(identity boundGameSessionCharac
 	s.logRuntimePartyMembershipRemoved("leave_repair_by_character", identity.character, identity.generation, before, result)
 	s.clearRuntimePartyProjection(identity.character, identity.generation)
 	if result.Disbanded || result.Party.ID == 0 {
+		for _, member := range before.Members {
+			if member.UserID != 0 && member.UserID != identity.character {
+				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			}
+		}
+		if result.Retired != nil {
+			for _, member := range result.Retired.Members {
+				if member.UserID != 0 && member.UserID != identity.character {
+					s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+				}
+			}
+		}
 		return alignedcmd.PartyState{}, result, true
 	}
 	return s.publishRuntimePartyMembershipSnapshot(result.Party), result, true
@@ -1791,12 +1803,14 @@ func (s *Service) broadcastRuntimePartyMemberRemoved(previousState, nextState al
 	if nextState.PartyID <= 0 {
 		members = runtimePartyMembers(previousState)
 	}
+	route := s.currentSceneActorRoute()
+	removedKey := currentSceneActorObjectKey(removedID)
 	for _, member := range members {
 		if member.UserID == removedID {
 			continue
 		}
 		session, ok := s.onlineGameSession(member.UserID)
-		if !ok || session == skip {
+		if !ok || session == nil || session == skip {
 			continue
 		}
 		identity, bound := s.boundGameSessionCharacterSnapshot(session)
@@ -1805,6 +1819,18 @@ func (s *Service) broadcastRuntimePartyMemberRemoved(previousState, nextState al
 		}
 		if err := s.sendRuntimePartyMemberRemoved(session, removedID, nextState); err != nil {
 			return err
+		}
+		if removedKey != 0 {
+			owners := []byte{currentSceneObjectContext}
+			if channel := currentClientSelectedChannel(session); channel != currentSceneObjectContext {
+				owners = append(owners, channel)
+			}
+			for _, owner := range owners {
+				body := buildCurrentSceneOp9ActorRemovalBodyInContext(removedKey, owner, route)
+				if err := s.sendGameUpperRawClass(session, uint16(dnfenum.CmdPacketRecoverStamina), body, 0); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil

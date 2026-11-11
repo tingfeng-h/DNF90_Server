@@ -1137,6 +1137,18 @@ func (s *Service) ensureCurrentConfirmedDungeonReturnPlayerState(
 		"char_id", characterID,
 		"owner_context", ownerChannel,
 		"sequence", currentTownPostTransitionPlayerStateSequence(currentTownReturnOmitsSceneActivation(session)))
+	// 本会话的 mode0/mode1 与同区队友的 mode0/mode1 已在 sendCurrentTownPostTransitionPlayerState
+	// 中重建完成；立即对本会话下发一次 op153+op9 把新队友角色绑回 CPartyManager.slotActors，
+	// 避免在等待其它队友处理 op35 的窗口期内出现队友血条短暂为空。
+	if state := s.townCopresenceActorPartyState(session); state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
+		if err := s.sendRuntimePartyRosterLocal(
+			session,
+			stateForRuntimePartyReceiver(state, session.selectedCharacterID),
+			source+"_direct_return_self_roster",
+		); err != nil {
+			return err
+		}
+	}
 	// op35 can consume the return without the later op15 scene finalizer.
 	// Actor reconstruction replaces the native party/HUD owner, so restore
 	// the roster after all members have completed their own return generation.

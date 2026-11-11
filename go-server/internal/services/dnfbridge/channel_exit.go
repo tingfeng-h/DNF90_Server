@@ -27,6 +27,11 @@ func (s *Service) handleCurrentChannelExit(session *gameSession, body []byte, so
 	// handover preserve a party whose client has already left its scene.
 	if !session.channelExitAcknowledged {
 		s.detachRuntimePartySession(session, "channel_exit")
+		if s.onlinePlayers != nil && session.selectedCharacterID != 0 {
+			if _, others, removed := s.onlinePlayers.LeaveAreaSession(session.selectedCharacterID, session); removed && len(others) > 0 {
+				s.broadcastTownPlayerLeave(session.selectedCharacterID, others)
+			}
+		}
 	}
 	cancelHandoff := s.rememberCurrentAuthenticatedChannelHandoff(session)
 	// Serialize the ACK with guild projections already using this scene.

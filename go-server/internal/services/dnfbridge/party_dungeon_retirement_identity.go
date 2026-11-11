@@ -45,6 +45,7 @@ func (s *Service) withCurrentDungeonPartyRetirement(identity boundGameSessionCha
 	if current := session.dungeon.runtime; current != nil && current.partyInstance != instance {
 		return false
 	}
+	activeInstanceMatches := session.dungeon.runtime != nil && session.dungeon.runtime.partyInstance == instance
 
 	// Warm the room-seed ledger without holding s.mu. A mismatch later simply
 	// falls back to the strict comparison, which rejects the retirement.
@@ -68,9 +69,9 @@ func (s *Service) withCurrentDungeonPartyRetirement(identity boundGameSessionCha
 			current.RaidInstanceID != "" && current.RaidInstanceID == retired.RaidInstanceID &&
 			current.RaidRunID != "" && current.RaidRunID == retired.RaidRunID
 		// 过门会替换房间 Seed，而 instance.key 永远停在进图首房。跑团靠冻结的
-		// 报名标识认场；普通副本没有这个标识，改用「这个 Seed 是不是本实例在
-		// 落房时登记过的」，既放行合法过图，又挡住其它一局的 Seed。
-		if sameRaidRun || (seedOwnedByInstance && current == probeKey) {
+		// 报名标识认场；普通副本没有这个标识，改用「当前仍持有该副本实例」或
+		// 「这个 Seed 是本实例在落房时登记过的」，既放行合法过图/断线退队，又挡住其它一局的陈旧回调。
+		if sameRaidRun || activeInstanceMatches || (seedOwnedByInstance && current == probeKey) {
 			current.Seed, retired.Seed = 0, 0
 		}
 		// Room coordinates legitimately advance inside the same instance.
