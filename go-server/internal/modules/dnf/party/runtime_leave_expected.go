@@ -27,6 +27,17 @@ func (m *RuntimePartyManager) LeaveDungeonExpected(userID uint16, generation uin
 		delete(m.parties, p.id)
 		return RuntimePartyResult{OK: true, Previous: &previous, TargetUser: userID, Disbanded: true}
 	}
+	// 单变量实验（默认 off）：副本内 2 -> 1 同样解散。
+	// 否则 dungeon_party_member_exit.go 会把 1 人 op9 发给图里最后一个人，
+	// 第二人的血条残留在房间里，最后一人过不了门、回城后还卡在残影队伍里。
+	if disbandOnSingleton() && p.count() == 1 {
+		for _, survivor := range p.membersBySlot() {
+			delete(m.byUser, survivor.UserID)
+		}
+		delete(m.parties, p.id)
+		disbanded := previous
+		return RuntimePartyResult{OK: true, Previous: &previous, TargetUser: userID, Disbanded: true, Retired: &disbanded}
+	}
 	if wasLeader {
 		p.leader = p.membersBySlot()[0].UserID
 		p.settings.UserID, p.settings.IsLeader = p.leader, true

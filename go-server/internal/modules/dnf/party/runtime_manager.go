@@ -298,6 +298,17 @@ func (m *RuntimePartyManager) leaveLocked(userID uint16, generation uint64, allo
 		delete(m.parties, party.id)
 		return RuntimePartyResult{OK: true, Previous: &previousCopy, TargetUser: userID, Disbanded: true}
 	}
+	// 单变量实验（默认 off）：2 -> 1 直接解散，不留下 1 人残党。
+	// 客户端没有「1 人普通队伍」状态，1 人 op9 会让血条永久残留且无法退队。
+	// Retired 带上解散前的完整快照（含幸存者），桥层据此下发 kind3 清场并关中继。
+	if disbandOnSingleton() && party.count() == 1 {
+		for _, survivor := range party.membersBySlot() {
+			delete(m.byUser, survivor.UserID)
+		}
+		delete(m.parties, party.id)
+		disbanded := previousCopy
+		return RuntimePartyResult{OK: true, Previous: &previousCopy, TargetUser: userID, Disbanded: true, Retired: &disbanded}
+	}
 	if !wasLeader {
 		result := runtimePartySuccess(party, userID)
 		result.Previous = &previousCopy

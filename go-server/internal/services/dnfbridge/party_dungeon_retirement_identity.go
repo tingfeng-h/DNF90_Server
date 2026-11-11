@@ -29,8 +29,13 @@ func (s *Service) withCurrentDungeonPartyRetirement(identity boundGameSessionCha
 		// Navigation also replaces the room seed. A frozen raid admission
 		// identifies the run independently of that seed; the instance retains
 		// its entry-room key while the session records the latest room.
-		// Ordinary runs still need the seed guard, as they lack this identity.
-		if current.RaidKey != 0 && current.RaidKey == retired.RaidKey &&
+		// Ordinary runs still need the seed guard, as they lack this identity --
+		// unless DNFBRIDGE_PARTY_DUNGEON_SEED_IGNORE=on, because navigation
+		// replaces the seed for ordinary rooms too and then every post-move
+		// retirement is rejected. Raid runs keep their identity through the
+		// struct comparison below, which still compares RaidKey,
+		// RaidInstanceID and RaidRunID.
+		if dungeonSeedIgnore() || current.RaidKey != 0 && current.RaidKey == retired.RaidKey &&
 			current.RaidInstanceID != "" && current.RaidInstanceID == retired.RaidInstanceID &&
 			current.RaidRunID != "" && current.RaidRunID == retired.RaidRunID {
 			current.Seed, retired.Seed = 0, 0
