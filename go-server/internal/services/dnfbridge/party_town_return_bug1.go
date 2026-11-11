@@ -8,13 +8,10 @@ import (
 	"longheng.io/server/internal/modules/dnf/dnfenum"
 )
 
-// bug1RetireDungeonPartyAliasesEnv 控制「回城重建城镇组队投影之前，先把副本作用域
-// 的别名 op9 记录用 kind3 退役掉」。
+// bug1RetireDungeonPartyAliasesEnv 控制「回城重建城镇组队投影之前，先把副本与城镇作用域
+// 的旧 op9 记录用 kind3 退役掉」。
 //
-// 默认（未设置 / on）= 退役；legacy / off / 0 / false / no = 回到改动前，只发
-// 城镇 R_self、不退役别名。
-//
-// 对应 dnf90_party_dungeon_bugfix_prompt.md 修改点 4 第 1 条。
+// 默认（未设置 / on）= 退役；legacy / off / 0 / false / no = 回到改动前。
 const bug1RetireDungeonPartyAliasesEnv = "DNFBRIDGE_PARTY_TOWN_RETURN_RETIRE_ALIASES"
 
 func bug1RetireDungeonPartyAliasesEnabled() bool {
@@ -26,33 +23,73 @@ func bug1RetireDungeonPartyAliasesEnabled() bool {
 	}
 }
 
-// retireDungeonPartyAliasRecords 在回城后重建城镇组队投影之前，把副本作用域
-// （owner = 0）的别名 op9 记录逐条用 kind3 退役：**先队友，最后自己**。
+// retireDungeonPartyAliasRecords 在回城后重建城镇组队投影（sendRuntimePartyRosterLocal）之前，
+// 把副本作用域（owner = 0）与城镇作用域（owner = channel）的旧 op9 记录逐条用 kind3 退役：
+// **先同屏非本队单人角色（如图内已退队者）、再本队队友、最后自己**。
 //
-// 为什么必须做：客户端 NOTI9 只有在 kind3 的 (objectKey, owner) 与
-// [local_actor+0x4C8] 当前指向的 CPartyRecord 完全一致时，才会走退队清场
-// （清空 0x56A3768 与 16 个血条槽位）。图内 3->2 时 survivor 收到了队友的
-// 别名 op9，[local_actor+0x4C8] 已经被改写成了**队友**的记录；回城后只发
-// 城镇 R_self 的话，这个绑定对不上，客户端会误入"首次入队"分支，`.gld127`
-// 调 ResetAllPeerConnections 把原本正常的两人 UDP 槽位全部抹成 -1，而随后
-// 的重连循环又因为队友已在旧槽位快照里而跳过，于是再次拉人时卡"连接中"并
-// 最终爆防火墙错误。
-//
-// 先退役队友别名、再退役自己，最后才发城镇 R_self，让 [local_actor+0x4C8]
-// 严格绑定回自己的记录。
+// 为什么必须同时退役 owner = 0 与 owner = channel：
+//  1. 图内 3->2 时 sendMemberGiveupSurvivorRosterAfterDeparture 已经把 record(self, channel)
+//     的槽位写成了幸存者名单 [1, 5]，并把退队者的 retainedRecordID=departingID (owner=0/channel)
+//     也写成了 [1, 5]。
+//  2. 回城 op24 重建城镇角色后，0x56A3768+0x48 (manager.slotActors) 中的旧副本角色指针已失效。
+//  3. 若不先把 record(self, channel) 与别名记录用 kind3 退役，紧接着的 sendRuntimePartyRosterLocal
+//     在客户端 0x29733B0 (0x29733E0) 会因 old_uid == new_uid 直接早退，且当 [local_actor+0x4C8]
+//     仍指向其它记录时 0x2017844 (before==0 && after==0) 会整条跳过 0x2017F95 (0x2977AB0 SetSlotActor)，
+//     导致队长的 0x29748E0 (CanInvite) 返回 0，右键退队者不出现"邀请组队"菜单项。
 func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members []alignedcmd.PartyMemberState, source string) error {
 	if s == nil || receiver == nil || receiver.selectedCharacterID == 0 {
 		return nil
 	}
 	route := s.currentSceneActorRoute()
-	retire := func(characterID uint16) error {
+	memberSet := make(map[uint16]bool, len(members))
+	for _, member := range members {
+		if member.UserID != 0 {
+			memberSet[member.UserID] = true
+		}
+	}
+
+	ordered := make([]uint16, 0, len(members)+4)
+	seen := make(map[uint16]bool, len(members)+4)
+	if s.onlinePlayers != nil {
+		for _, peer := range s.onlinePlayers.PeersInSameArea(receiver.selectedCharacterID) {
+			if peer.CharacterID == 0 || memberSet[peer.CharacterID] || seen[peer.CharacterID] {
+				continue
+			}
+			if peer.Session != nil {
+				peerState := s.townCopresenceActorPartyState(peer.Session)
+				if peerState.PartyID > 0 {
+					continue
+				}
+			}
+			seen[peer.CharacterID] = true
+			ordered = append(ordered, peer.CharacterID)
+		}
+	}
+	for _, member := range members {
+		if member.UserID == 0 || member.UserID == receiver.selectedCharacterID || seen[member.UserID] {
+			continue
+		}
+		seen[member.UserID] = true
+		ordered = append(ordered, member.UserID)
+	}
+	if !seen[receiver.selectedCharacterID] {
+		seen[receiver.selectedCharacterID] = true
+		ordered = append(ordered, receiver.selectedCharacterID)
+	}
+
+	owners := []byte{currentSceneObjectContext}
+	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
+		owners = append(owners, channel)
+	}
+
+	retire := func(characterID uint16, owner byte) error {
 		objectKey := currentSceneActorObjectKey(characterID)
 		if objectKey == 0 {
 			return nil
 		}
 		body := buildCurrentSceneOp9ActorRemovalBodyInContext(
 			objectKey,
-			currentSceneObjectContext,
+			owner,
 			route,
 		)
 		return s.sendGameUpperRawClass(
@@ -62,27 +99,21 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 			0,
 		)
 	}
-	retiredPeers := 0
-	for _, member := range members {
-		if member.UserID == receiver.selectedCharacterID {
-			continue
+
+	for _, owner := range owners {
+		for _, charID := range ordered {
+			if err := retire(charID, owner); err != nil {
+				return err
+			}
 		}
-		if err := retire(member.UserID); err != nil {
-			return err
-		}
-		retiredPeers++
 	}
-	// Self last: the immediately following town roster must be the record the
-	// client ends up bound to.
-	if err := retire(receiver.selectedCharacterID); err != nil {
-		return err
-	}
+
 	s.logGameEvent(receiver, "game-party-town-return-dungeon-alias-retired",
 		"source", source,
 		"char_id", receiver.selectedCharacterID,
-		"retired_peers", retiredPeers,
+		"retired_peers", len(ordered)-1,
 		"owner_channel", currentSceneObjectContext,
 		"switch", bug1RetireDungeonPartyAliasesEnv,
-		"reason", "kind3_owner0_peers_then_self_before_town_self_record")
+		"reason", "kind3_owner0_and_channel_peers_then_self_before_town_self_record")
 	return nil
 }

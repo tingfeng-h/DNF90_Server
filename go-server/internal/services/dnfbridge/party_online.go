@@ -388,7 +388,7 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
 	}
-	if err := s.sendRuntimePartyMemberRemoved(session, sourceID, alignedcmd.PartyState{}); err != nil {
+	if err := s.sendRuntimePartyDeparture(session, previous); err != nil {
 		return err
 	}
 	if result.Retired != nil {
@@ -397,9 +397,18 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 			if member.UserID == sourceID {
 				continue
 			}
+			if nextState.PartyID <= 0 {
+				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			}
 			if targetSession, online := s.onlineGameSession(member.UserID); online {
-				if err := s.sendRuntimePartySnapshot(targetSession, alignedcmd.PartyState{}); err != nil {
-					return err
+				if nextState.PartyID <= 0 {
+					if err := s.sendRuntimePartyDeparture(targetSession, result.Retired.StateFor(member.UserID)); err != nil {
+						return err
+					}
+				} else {
+					if err := s.sendRuntimePartySnapshot(targetSession, alignedcmd.PartyState{}); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -500,6 +509,13 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 		return s.sendPartyCommandFailure(session, typ, walkoutPartyFailureInvalid)
 	}
 	s.logRuntimePartyMembershipRemoved("leader_kick_walkout", target.UserID, target.SessionGeneration, kickedSnapshot, result)
+	if result.Disbanded || result.Party.ID == 0 {
+		for _, member := range kickedSnapshot.Members {
+			if member.UserID != 0 && member.UserID != target.UserID {
+				s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+			}
+		}
+	}
 	nextState := s.publishRuntimePartyMembershipSnapshot(result.Party)
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
@@ -508,7 +524,7 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 		return err
 	}
 	if nextState.PartyID <= 0 {
-		s.closeRuntimePartyUDPRelay(int(result.Party.ID))
+		s.closeRuntimePartyUDPRelay(int(kickedSnapshot.ID))
 	} else {
 		s.syncRuntimePartyUDPRelay(nextState)
 	}
@@ -538,7 +554,45 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 		}
 	}
 	if kickInstance != nil {
+		if nextState.PartyID <= 0 {
+			beforeMembers := runtimePartyMembers(previousState)
+			for _, member := range kickedSnapshot.Members {
+				if member.UserID == 0 || member.UserID == target.UserID {
+					continue
+				}
+				peerSession, ok := s.onlineGameSession(member.UserID)
+				if !ok || peerSession == nil {
+					continue
+				}
+				if err := s.clearDungeonSurvivorTownPartyRecords(peerSession, beforeMembers, "leader_kick_walkout"); err != nil {
+					return err
+				}
+				if err := s.clearDisbandedDungeonPartyRecords(peerSession, beforeMembers, target.UserID, false, "leader_kick_walkout"); err != nil {
+					return err
+				}
+				if err := s.sendRuntimePartyMemberRemoved(peerSession, target.UserID, alignedcmd.PartyState{}); err != nil {
+					return err
+				}
+				if err := s.sendDungeonDepartedActorRemoval(peerSession, target.UserID, "leader_kick_walkout"); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		return s.sendMemberGiveupSurvivorRosterAfterDeparture(nextState, kickInstance, target.UserID)
+	}
+	if nextState.PartyID <= 0 {
+		for _, member := range kickedSnapshot.Members {
+			if member.UserID == 0 || member.UserID == target.UserID {
+				continue
+			}
+			if peerSession, ok := s.onlineGameSession(member.UserID); ok && peerSession != nil {
+				if err := s.sendRuntimePartyDeparture(peerSession, kickedSnapshot.StateFor(member.UserID)); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 	if err := s.broadcastRuntimePartyMemberRemoved(previousState, nextState, target.UserID, nil); err != nil {
 		return err

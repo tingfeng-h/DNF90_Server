@@ -730,11 +730,12 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// 两个人回城后互相看不见。默认档登记城镇同屏 + 作废本会话的副本运行键；
 		// 回退档一个字段都不改。见 dungeon_party_completion_return_town_presence.go。
 		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
-		// The completed op72 route has no guaranteed trailing op15. A party of
-		// one still needs its realtime actor state restored after town presence
-		// becomes ready; the generic completion fanout intentionally skips it.
-		if state := runtimePartyStateSnapshot(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) == 1 {
-			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_single_party_town_restore"); err != nil {
+		// publishCompletedDungeonReturnTownPresence 刚刚把本会话的 townSceneReadyCharacterID
+		// 与 townPositionSnapshot 置为就绪；在此之前（第 724 行）调用的
+		// rebuildRuntimePartyTownCoPresenceAfterReturn 必然因本会话尚未 ready 而早退。
+		// 因此无论队伍是 1 人还是多人，都在登记完城镇存在后再触发一次同屏与队伍投影重建。
+		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 1 {
+			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_party_town_restore_after_presence"); err != nil {
 				return err
 			}
 		}

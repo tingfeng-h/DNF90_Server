@@ -374,11 +374,24 @@ func (m *RuntimePartyManager) Kick(byUser uint16, byGeneration uint64, targetUse
 		return runtimePartyFailure("stale_target_session")
 	}
 	previous := snapshotRuntimeParty(party)
+	previousCopy := previous
 	party.remove(targetUser)
 	delete(m.byUser, targetUser)
 	m.clearInvitesForLocked(targetUser, targetGeneration)
+	if party.count() == 0 {
+		delete(m.parties, party.id)
+		return RuntimePartyResult{OK: true, Previous: &previousCopy, TargetUser: targetUser, Disbanded: true}
+	}
+	if disbandOnSingleton() && party.count() == 1 {
+		for _, survivor := range party.membersBySlot() {
+			delete(m.byUser, survivor.UserID)
+		}
+		delete(m.parties, party.id)
+		disbanded := previousCopy
+		return RuntimePartyResult{OK: true, Previous: &previousCopy, TargetUser: targetUser, Disbanded: true, Retired: &disbanded}
+	}
 	result := runtimePartySuccess(party, targetUser)
-	result.Previous = &previous
+	result.Previous = &previousCopy
 	return result
 }
 

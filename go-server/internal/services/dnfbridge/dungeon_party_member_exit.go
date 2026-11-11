@@ -61,6 +61,13 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 		if removed {
 			s.logRuntimePartyMembershipRemoved(source, identity.character, identity.generation, before, result)
 			s.clearRuntimePartyProjection(identity.character, identity.generation)
+			if result.Disbanded || result.Party.ID == 0 {
+				for _, member := range before.Members {
+					if member.UserID != 0 && member.UserID != identity.character {
+						s.clearRuntimePartyProjection(member.UserID, member.SessionGeneration)
+					}
+				}
+			}
 			next = s.publishRuntimePartySnapshot(result.Party)
 		}
 	} else if drifted {
@@ -83,13 +90,55 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 	} else {
 		s.syncRuntimePartyUDPRelay(next)
 	}
+	beforeLeaderState := before.StateFor(before.Leader)
 	if notifyDeparting {
-		errs = errors.Join(errs, s.sendRuntimePartyDeparture(session, before.StateFor(before.Leader)))
+		s.markFiendWarPartyClearOnTownSceneReady(session)
+		errs = errors.Join(errs, s.sendRuntimePartyDeparture(session, beforeLeaderState))
 	}
 	if s.options.currentClientVersion == "official-24.9" {
-		errs = errors.Join(errs, s.sendMemberGiveupSurvivorRosterAfterDeparture(next, instance, identity.character))
+		if len(runtimePartyMembers(next)) == 0 {
+			// 2 -> 1 解散时 next.Members 为空，必须按 before 快照对仍留在图内/在线的幸存者下发完整 kind3 清场与离场移除
+			beforeMembers := runtimePartyMembers(beforeLeaderState)
+			for _, member := range before.Members {
+				if member.UserID == 0 || member.UserID == identity.character {
+					continue
+				}
+				peerIdentity, ok := s.onlineGameSessionCharacterSnapshot(member.UserID)
+				if !ok || peerIdentity.session == nil {
+					continue
+				}
+				peerSession := peerIdentity.session
+				inDungeon := false
+				for _, peer := range peers {
+					if peer.CharacterID == member.UserID && peer.Session == peerSession {
+						inDungeon = true
+						break
+					}
+				}
+				if inDungeon {
+					errs = errors.Join(errs, s.clearDungeonSurvivorTownPartyRecords(peerSession, beforeMembers, source))
+					errs = errors.Join(errs, s.clearDisbandedDungeonPartyRecords(peerSession, beforeMembers, identity.character, false, source))
+					errs = errors.Join(errs, s.sendRuntimePartyMemberRemoved(peerSession, identity.character, alignedcmd.PartyState{}))
+					errs = errors.Join(errs, s.sendDungeonDepartedActorRemoval(peerSession, identity.character, source))
+				} else {
+					s.markFiendWarPartyClearOnTownSceneReady(peerSession)
+					errs = errors.Join(errs, s.sendRuntimePartyDeparture(peerSession, before.StateFor(member.UserID)))
+				}
+			}
+			if dungeonPartyRunKeyTownResetEnabled() {
+				memberIDs := make([]uint16, 0, len(before.Members))
+				for _, member := range before.Members {
+					if member.UserID != 0 {
+						memberIDs = append(memberIDs, member.UserID)
+					}
+				}
+				s.forgetRuntimePartyRunKeysOnDisband(memberIDs, before.ID, source)
+			}
+		} else {
+			errs = errors.Join(errs, s.sendMemberGiveupSurvivorRosterAfterDeparture(next, instance, identity.character))
+		}
 	} else {
-		errs = errors.Join(errs, s.broadcastRuntimePartyMemberRemoved(before.StateFor(before.Leader), next, identity.character, session))
+		errs = errors.Join(errs, s.broadcastRuntimePartyMemberRemoved(beforeLeaderState, next, identity.character, session))
 	}
 	s.logGameEvent(session, "game-party-member-giveup-left", "char_id", identity.character,
 		"party_id", before.ID, "leader_char_id", before.Leader, "remaining_members", len(next.Members), "source", source)
@@ -177,8 +226,13 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 			return false, err
 		}
 	}
-	selfSent := false
-	for _, row := range runtimePartyMembers(state) {
+	// 先发所有幸存队友（peers），最后发收包者自己（self），确保在 owner=channel 下
+	// 原生 0x29738FE 最终把 [local_actor+0x4C8] 绑定回 receiver 自己的记录。
+	members := runtimePartyMembers(state)
+	for _, row := range members {
+		if row.UserID == 0 || row.UserID == receiver.selectedCharacterID {
+			continue
+		}
 		actor, found := s.onlineGameSession(row.UserID)
 		if !found {
 			continue
@@ -187,7 +241,10 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 		if err != nil || !sent {
 			return false, err
 		}
-		selfSent = selfSent || actor == receiver
 	}
-	return selfSent, nil
+	selfSent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, "member_giveup_survivor_dungeon_roster", nil, selection)
+	if err != nil || !selfSent {
+		return false, err
+	}
+	return true, nil
 }

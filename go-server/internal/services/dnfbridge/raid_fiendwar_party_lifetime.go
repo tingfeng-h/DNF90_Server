@@ -154,7 +154,7 @@ func (s *Service) flushFiendWarPartyClearOnTownSceneReady(session *gameSession, 
 	if state := s.runtimePartyStateForSession(session); state.PartyID > 0 {
 		return
 	}
-	if err := s.sendRuntimePartyMemberRemoved(session, 0, alignedcmd.PartyState{}); err != nil {
+	if err := s.sendRuntimePartyDeparture(session, alignedcmd.PartyState{}); err != nil {
 		s.logGameEvent(session, "game-fiendwar-party-clear-town-ready-failed",
 			"source", source, "char_id", session.selectedCharacterID, "error", err)
 	}
