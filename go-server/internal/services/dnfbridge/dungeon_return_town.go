@@ -730,13 +730,13 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// 两个人回城后互相看不见。默认档登记城镇同屏 + 作废本会话的副本运行键；
 		// 回退档一个字段都不改。见 dungeon_party_completion_return_town_presence.go。
 		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
-		// 只对单人队伍在这里补发。放宽到 >= 1 会让三人在城镇里每收到一次
-		// op35 position / op15 scene finalizer 就整队重发一遍
-		// mode0/mode1/op9/op23 + realtime 名册（日志里 copresence-rebuilt 每 3~4 秒
-		// 刷一次），客户端表现为队员血条被清空、副本 buff 在城镇里反复出现。
-		// 多人队伍的重建应当由"真正发生了一次副本->城镇转换"触发。
-		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) == 1 {
-			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_single_party_town_restore"); err != nil {
+		// 通关回城（op72 / completed_town_route）在第 724 行调 settleRuntimePartyOnDungeonCompletionReturn
+		// 时本会话的 publishCompletedDungeonReturnTownPresence 尚未执行（townSceneReadyCharacterID 为 0），
+		// 因此最后一个回城成员必须在 publish 之后触发一次全队同屏与队伍投影重建。
+		// 重复调用由 rebuildRuntimePartyTownCoPresenceAfterReturn 内部的世代签名严格幂等拦截，
+		// 别名退役也由 dungeonPartyAliasRetireCharID 一次性消费，不会随 op35/op15 刷屏。
+		if state := s.townCopresenceActorPartyState(session); published && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 1 {
+			if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_party_town_restore_after_presence"); err != nil {
 				return err
 			}
 		}
