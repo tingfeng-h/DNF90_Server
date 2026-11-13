@@ -32,9 +32,15 @@ func (s *Service) sendRuntimePartyDeparture(receiver *gameSession, previous alig
 	// 0x201786B..0x2017D77 执行完整退队清场并释放 CPartyRecord。
 	// 顺序必须为：先 owner=0（副本作用域，不依赖当前场景号），后 owner=channel；
 	// 每个作用域内先退役所有队友（peers），最后退役自己（self）。
-	ordered := make([]uint16, 0, len(members)+1)
-	seen := make(map[uint16]bool, len(members)+1)
+	ordered := make([]uint16, 0, len(members)+len(previous.Members)+1)
+	seen := make(map[uint16]bool, len(members)+len(previous.Members)+1)
 	for _, member := range members {
+		if member.UserID != 0 && member.UserID != identity.character && !seen[member.UserID] {
+			seen[member.UserID] = true
+			ordered = append(ordered, member.UserID)
+		}
+	}
+	for _, member := range previous.Members {
 		if member.UserID != 0 && member.UserID != identity.character && !seen[member.UserID] {
 			seen[member.UserID] = true
 			ordered = append(ordered, member.UserID)

@@ -19,5 +19,10 @@ import (
 const disbandOnSingletonEnv = "DNFBRIDGE_PARTY_DISBAND_ON_SINGLETON"
 
 func disbandOnSingleton() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv(disbandOnSingletonEnv)), "on")
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(disbandOnSingletonEnv))) {
+	case "0", "off", "false", "no", "legacy":
+		return false
+	default:
+		return true
+	}
 }

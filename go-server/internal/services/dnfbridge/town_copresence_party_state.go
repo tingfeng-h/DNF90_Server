@@ -3,6 +3,7 @@ package dnfbridge
 import (
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 )
@@ -121,6 +122,9 @@ func (s *Service) shouldSkipTownCopresencePartyFrame(target, actor *gameSession)
 	// actor's own state notification intact. Explicit off remains a rollback.
 	if target.selectedCharacterID == 0 || target.selectedCharacterID == actor.selectedCharacterID {
 		return false
+	}
+	if atomic.LoadUint32(&target.dungeonReturnAliasRetirePending) == 1 {
+		return true
 	}
 	if !townCopresenceSkipSamePartyFrameEnabled() && !(strings.TrimSpace(os.Getenv(townCopresenceSkipSamePartyFrameEnv)) == "" && s.options.currentClientVersion == "official-24.9") {
 		return false

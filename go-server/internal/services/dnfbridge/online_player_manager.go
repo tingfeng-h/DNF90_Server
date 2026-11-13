@@ -861,6 +861,33 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 	}
 	s.broadcastTownPlayerEnter(playerInfo, newOthers)
 	partyStateAfter := s.townCopresenceActorPartyState(session)
+	partyPeers := make([]onlinePlayerInfo, 0, len(newOthers)+len(runtimePartyMembers(partyStateAfter)))
+	partyPeers = append(partyPeers, newOthers...)
+	seenPartyPeer := make(map[uint16]bool, len(partyPeers))
+	for _, peer := range partyPeers {
+		seenPartyPeer[peer.CharacterID] = true
+	}
+	for _, member := range runtimePartyMembers(partyStateAfter) {
+		if member.UserID == 0 || member.UserID == session.selectedCharacterID || seenPartyPeer[member.UserID] {
+			continue
+		}
+		peerInfo, found := s.onlinePlayers.PlayerForCharacter(member.UserID)
+		if !found || peerInfo.Session == nil {
+			continue
+		}
+		peerSession := peerInfo.Session
+		if currentTownPresenceChannelID(peerSession) != currentTownPresenceChannelID(session) {
+			continue
+		}
+		peerSession.dungeon.mu.Lock()
+		peerInDungeon := peerSession.dungeon.runtime != nil || peerSession.confirmedDungeonReturnStatePending
+		peerSession.dungeon.mu.Unlock()
+		if peerInDungeon || !currentPartyTownReturnSceneReady(peerSession) {
+			continue
+		}
+		seenPartyPeer[member.UserID] = true
+		partyPeers = append(partyPeers, peerInfo)
+	}
 	if partyStateAfter.PartyID > 0 {
 		if err := s.sendTownRemotePartyActors(session, partyStateAfter); err != nil {
 			s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
@@ -886,8 +913,8 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 					"source", source,
 					"error", err)
 			}
-			for i := range newOthers {
-				peer := newOthers[i]
+			for i := range partyPeers {
+				peer := partyPeers[i]
 				if peer.Session == nil {
 					continue
 				}
@@ -905,8 +932,8 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 				})
 			}
 		} else {
-			for i := range newOthers {
-				peer := newOthers[i]
+			for i := range partyPeers {
+				peer := partyPeers[i]
 				if peer.Session == nil {
 					continue
 				}
@@ -918,6 +945,14 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 					return s.sendRuntimePartyRosterLocal(peer.Session, peerState, source+"_dungeon_return_peer_roster_rebind")
 				})
 			}
+		}
+	} else if bug1RetireDungeonPartyAliasesEnabled() && consumeDungeonReturnAliasRetirePending(session) {
+		if err := s.retireDungeonPartyAliasRecords(session, nil, source+"_dungeon_return_retire_aliases"); err != nil {
+			s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
+				"char_id", characterID,
+				"party_id", partyStateAfter.PartyID,
+				"source", source,
+				"error", err)
 		}
 	}
 	s.logGameEvent(session, "game-dungeon-return-copresence-rebound",

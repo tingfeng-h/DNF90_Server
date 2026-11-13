@@ -65,7 +65,7 @@ func (s *Service) allSameChannelPartyMembersOutsideDungeon(receiver *gameSession
 		memberSession.dungeon.mu.Lock()
 		inDungeon := memberSession.dungeon.runtime != nil || memberSession.confirmedDungeonReturnStatePending
 		memberSession.dungeon.mu.Unlock()
-		if inDungeon {
+		if inDungeon || !currentPartyTownReturnSceneReady(memberSession) {
 			return false
 		}
 	}
@@ -81,13 +81,16 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		return nil
 	}
 	route := s.currentSceneActorRoute()
-	memberSet := make(map[uint16]bool, len(members))
+	memberSet := make(map[uint16]bool, len(members)+1)
+	memberSet[receiver.selectedCharacterID] = true
 	for _, member := range members {
 		if member.UserID != 0 {
 			memberSet[member.UserID] = true
 		}
 	}
 
+	nonPartyIDs := make([]uint16, 0, 4)
+	peerIDs := make([]uint16, 0, len(members))
 	ordered := make([]uint16, 0, len(members)+4)
 	seen := make(map[uint16]bool, len(members)+4)
 	if s.onlinePlayers != nil {
@@ -95,31 +98,50 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 			if peer.CharacterID == 0 || memberSet[peer.CharacterID] || seen[peer.CharacterID] {
 				continue
 			}
-			if peer.Session != nil {
-				peerState := s.townCopresenceActorPartyState(peer.Session)
-				if peerState.PartyID > 0 {
-					continue
-				}
-			}
 			seen[peer.CharacterID] = true
+			nonPartyIDs = append(nonPartyIDs, peer.CharacterID)
 			ordered = append(ordered, peer.CharacterID)
 		}
+		receiverChannelID := currentTownPresenceChannelID(receiver)
+		s.onlinePlayers.mu.RLock()
+		var sameChannelCandidates []onlinePlayerInfo
+		for area, bucket := range s.onlinePlayers.byArea {
+			if area.ChannelID != receiverChannelID {
+				continue
+			}
+			for _, info := range bucket {
+				if info != nil && info.CharacterID != 0 && !memberSet[info.CharacterID] && !seen[info.CharacterID] {
+					sameChannelCandidates = append(sameChannelCandidates, *info)
+				}
+			}
+		}
+		s.onlinePlayers.mu.RUnlock()
+		for _, cand := range sameChannelCandidates {
+			if seen[cand.CharacterID] {
+				continue
+			}
+			seen[cand.CharacterID] = true
+			nonPartyIDs = append(nonPartyIDs, cand.CharacterID)
+			ordered = append(ordered, cand.CharacterID)
+		}
 	}
+	var handoffPeer *gameSession
 	for _, member := range members {
 		if member.UserID == 0 || member.UserID == receiver.selectedCharacterID || seen[member.UserID] {
 			continue
 		}
 		seen[member.UserID] = true
+		peerIDs = append(peerIDs, member.UserID)
 		ordered = append(ordered, member.UserID)
+		if handoffPeer == nil {
+			if peerSession, ok := s.onlineGameSession(member.UserID); ok && peerSession != nil {
+				handoffPeer = peerSession
+			}
+		}
 	}
 	if !seen[receiver.selectedCharacterID] {
 		seen[receiver.selectedCharacterID] = true
 		ordered = append(ordered, receiver.selectedCharacterID)
-	}
-
-	owners := []byte{currentSceneObjectContext}
-	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
-		owners = append(owners, channel)
 	}
 
 	retire := func(characterID uint16, owner byte) error {
@@ -140,9 +162,48 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		)
 	}
 
-	for _, owner := range owners {
-		for _, charID := range ordered {
-			if err := retire(charID, owner); err != nil {
+	// 1. 副本作用域（owner = 0）：全量静默退役。
+	for _, charID := range ordered {
+		if err := retire(charID, currentSceneObjectContext); err != nil {
+			return err
+		}
+	}
+
+	// 2. 城镇作用域（owner = channel）：四步零解散换绑。
+	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
+		state := stateForRuntimePartyReceiver(s.townCopresenceActorPartyState(receiver), receiver.selectedCharacterID)
+		selection := currentPartyFrameOwnerSelection{Mode: currentPartyFrameOwnerExplicit, Owner: channel}
+		if handoffPeer != nil && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
+			// Step A：把 [local_actor+0x4C8] 暂存绑定到空槽的 record(handoffPeer, channel)。
+			if _, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, handoffPeer, state, source+"_channel_handoff_peer", nil, selection); err != nil {
+				return err
+			}
+			// Step B：趁指针停在 handoffPeer，静默清非本队散人与本机旧记录。
+			for _, id := range nonPartyIDs {
+				if err := retire(id, channel); err != nil {
+					return err
+				}
+			}
+			if err := retire(receiver.selectedCharacterID, channel); err != nil {
+				return err
+			}
+			// Step C：重建 record(self, channel)，把本机与队友 actor 绑回。
+			if _, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, source+"_channel_rebind_self", nil, selection); err != nil {
+				return err
+			}
+			// Step D：再静默释放队友的 channel 临时记录。
+			for _, id := range peerIDs {
+				if err := retire(id, channel); err != nil {
+					return err
+				}
+			}
+		} else {
+			for _, id := range nonPartyIDs {
+				if err := retire(id, channel); err != nil {
+					return err
+				}
+			}
+			if err := retire(receiver.selectedCharacterID, channel); err != nil {
 				return err
 			}
 		}

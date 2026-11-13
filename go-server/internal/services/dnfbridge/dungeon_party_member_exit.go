@@ -91,6 +91,32 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 		s.syncRuntimePartyUDPRelay(next)
 	}
 	beforeLeaderState := before.StateFor(before.Leader)
+	beforeMembers := runtimePartyMembers(beforeLeaderState)
+	instance.mu.Lock()
+	for _, member := range before.Members {
+		if member.UserID != 0 {
+			instance.retiredMembers = append(instance.retiredMembers, member.UserID)
+		}
+	}
+	if identity.character != 0 {
+		instance.retiredMembers = append(instance.retiredMembers, identity.character)
+	}
+	retiredIDs := append([]uint16(nil), instance.retiredMembers...)
+	instance.mu.Unlock()
+	seenBeforeMember := make(map[uint16]bool, len(beforeMembers)+len(retiredIDs))
+	for _, member := range beforeMembers {
+		if member.UserID != 0 {
+			seenBeforeMember[member.UserID] = true
+		}
+	}
+	for _, retiredID := range retiredIDs {
+		if retiredID != 0 && !seenBeforeMember[retiredID] {
+			seenBeforeMember[retiredID] = true
+			beforeMembers = append(beforeMembers, alignedcmd.PartyMemberState{UserID: retiredID})
+		}
+	}
+	beforeLeaderState.MaxMembers = 4
+	beforeLeaderState.Members = beforeMembers
 	if notifyDeparting {
 		s.markFiendWarPartyClearOnTownSceneReady(session)
 		errs = errors.Join(errs, s.sendRuntimePartyDeparture(session, beforeLeaderState))
@@ -98,7 +124,6 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 	if s.options.currentClientVersion == "official-24.9" {
 		if len(runtimePartyMembers(next)) == 0 {
 			// 2 -> 1 解散时 next.Members 为空，必须按 before 快照对仍留在图内/在线的幸存者下发完整 kind3 清场与离场移除
-			beforeMembers := runtimePartyMembers(beforeLeaderState)
 			for _, member := range before.Members {
 				if member.UserID == 0 || member.UserID == identity.character {
 					continue
@@ -126,8 +151,8 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 				}
 			}
 			if dungeonPartyRunKeyTownResetEnabled() {
-				memberIDs := make([]uint16, 0, len(before.Members))
-				for _, member := range before.Members {
+				memberIDs := make([]uint16, 0, len(beforeMembers))
+				for _, member := range beforeMembers {
 					if member.UserID != 0 {
 						memberIDs = append(memberIDs, member.UserID)
 					}
@@ -228,18 +253,20 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 	}
 	// 先发所有幸存队友（peers），最后发收包者自己（self），确保在 owner=channel 下
 	// 原生 0x29738FE 最终把 [local_actor+0x4C8] 绑定回 receiver 自己的记录。
-	members := runtimePartyMembers(state)
-	for _, row := range members {
-		if row.UserID == 0 || row.UserID == receiver.selectedCharacterID {
-			continue
-		}
-		actor, found := s.onlineGameSession(row.UserID)
-		if !found {
-			continue
-		}
-		sent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, actor, state, "member_giveup_survivor_dungeon_roster", nil, selection)
-		if err != nil || !sent {
-			return false, err
+	if owner == currentSceneObjectContext {
+		members := runtimePartyMembers(state)
+		for _, row := range members {
+			if row.UserID == 0 || row.UserID == receiver.selectedCharacterID {
+				continue
+			}
+			actor, found := s.onlineGameSession(row.UserID)
+			if !found {
+				continue
+			}
+			sent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, actor, state, "member_giveup_survivor_dungeon_roster", nil, selection)
+			if err != nil || !sent {
+				return false, err
+			}
 		}
 	}
 	selfSent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, "member_giveup_survivor_dungeon_roster", nil, selection)

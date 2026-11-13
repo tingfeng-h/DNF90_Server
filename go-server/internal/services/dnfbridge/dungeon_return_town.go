@@ -1017,11 +1017,12 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 	// 副本返回城镇不会走 SET_USER_AREA，因此必须在这里重新登记城镇同屏，
 	// 否则服务端仍以为玩家在副本区域，同屏广播不会发生（出图后互相看不见）。
 	armDungeonReturnAliasRetirePending(session)
-	s.rebindTownCopresenceAfterDungeonReturn(session, townID, areaID, source+"_copresence_rebind")
-	return s.ensureCurrentConfirmedDungeonReturnPlayerState(
+	err := s.ensureCurrentConfirmedDungeonReturnPlayerState(
 		session,
 		source+"_after_confirmed_typed_op24",
 	)
+	s.rebindTownCopresenceAfterDungeonReturn(session, townID, areaID, source+"_copresence_rebind")
+	return err
 }
 
 // ensureCurrentConfirmedDungeonReturnPlayerState consumes the direct
@@ -1090,10 +1091,20 @@ func (s *Service) ensureCurrentConfirmedDungeonReturnPlayerState(
 	session.townPostTransition.mu.Unlock()
 	switch {
 	case stage == currentTownPostTransitionIdle || stage == currentTownPostTransitionComplete:
-		s.armCurrentTownPostTransitionPlayerState(
-			session,
-			source+"_arm_direct_return_generation",
-		)
+		if selectorReturn != nil {
+			s.armCurrentTownPostTransitionPlayerStateWithProfile(
+				session,
+				source+"_arm_direct_return_generation",
+				characterID,
+				ownerChannel,
+				true,
+			)
+		} else {
+			s.armCurrentTownPostTransitionPlayerState(
+				session,
+				source+"_arm_direct_return_generation",
+			)
+		}
 	case armedCharacterID != characterID:
 		return fmt.Errorf(
 			"confirmed dungeon return actor rebuild owner changed: armed=%d selected=%d stage=%d",
@@ -1140,15 +1151,6 @@ func (s *Service) ensureCurrentConfirmedDungeonReturnPlayerState(
 	// 本会话的 mode0/mode1 与同区队友的 mode0/mode1 已在 sendCurrentTownPostTransitionPlayerState
 	// 中重建完成；立即对本会话下发一次 op153+op9 把新队友角色绑回 CPartyManager.slotActors，
 	// 避免在等待其它队友处理 op35 的窗口期内出现队友血条短暂为空。
-	if state := s.townCopresenceActorPartyState(session); state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
-		if err := s.sendRuntimePartyRosterLocal(
-			session,
-			stateForRuntimePartyReceiver(state, session.selectedCharacterID),
-			source+"_direct_return_self_roster",
-		); err != nil {
-			return err
-		}
-	}
 	// op35 can consume the return without the later op15 scene finalizer.
 	// Actor reconstruction replaces the native party/HUD owner, so restore
 	// the roster after all members have completed their own return generation.
