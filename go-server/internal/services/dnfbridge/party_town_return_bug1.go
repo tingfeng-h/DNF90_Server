@@ -162,11 +162,16 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		)
 	}
 
-	// 1. 副本作用域（owner = 0）：全量静默退役。
-	for _, charID := range ordered {
-		if err := retire(charID, currentSceneObjectContext); err != nil {
+	// 1. 副本作用域（owner = 0）：仅退役已退队散人（nonPartyIDs）与本机（self），
+	// 不对当前仍在队内的队友（peerIDs）发送 kind3(peerID, 0)，避免在城镇态下穿透到
+	// 0x29733B0 误伤同区队友模型或清零 +0x4C8。
+	for _, id := range nonPartyIDs {
+		if err := retire(id, currentSceneObjectContext); err != nil {
 			return err
 		}
+	}
+	if err := retire(receiver.selectedCharacterID, currentSceneObjectContext); err != nil {
+		return err
 	}
 
 	// 2. 城镇作用域（owner = channel）：四步零解散换绑。
@@ -190,12 +195,6 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 			// Step C：重建 record(self, channel)，把本机与队友 actor 绑回。
 			if _, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, source+"_channel_rebind_self", nil, selection); err != nil {
 				return err
-			}
-			// Step D：再静默释放队友的 channel 临时记录。
-			for _, id := range peerIDs {
-				if err := retire(id, channel); err != nil {
-					return err
-				}
 			}
 		} else {
 			for _, id := range nonPartyIDs {
