@@ -49,10 +49,11 @@ type runtimeRaidMemberState struct {
 	Job        byte
 	GrowType   byte
 	Level      uint32
-	// OrdinaryPartySolo only changes the current client's roster icon when an
-	// ordinary-party membership transition leaves this member in no party or a
-	// one-member lobby. GroupIndex/SlotOrder remain the planned raid placement;
-	// Battle.MemberGroups remains the frozen reward grouping.
+	// OrdinaryPartySolo reflects actual party membership or explicit recruiting
+	// intent. Normal current-client raid start keeps these members independent;
+	// its automatic admission seats are not requests to form an ordinary party.
+	// GroupIndex/SlotOrder remain planned seats, and Battle.MemberGroups remains
+	// the frozen reward grouping.
 	OrdinaryPartySolo bool
 	// A recruiting manager action owns this planned seat's display even before
 	// raid start materializes ordinary parties. Automatic admission seats do not.
@@ -372,13 +373,17 @@ func (s *Service) handleOnlineRequestRaidInfo(session *gameSession, body []byte)
 			}
 			selector = 2
 		}
+		state = s.currentRaidLivePartyProjection(state)
 		reply, err := raid.BuildCurrentInfoReplyBody(currentRuntimeRaidMetadata(state), selector)
 		if err != nil {
 			return err
 		}
 		s.logGameEvent(session, "game-raid-info-sent", "raid_key", key, "mode", "current_ack1359", "selector", selector)
-		if err := s.sendCurrentRuntimeRaidProfiles(session, state); err != nil {
-			return err
+		profileCtx, cancelProfiles := context.WithTimeout(context.Background(), createWriteTimeout)
+		defer cancelProfiles()
+		profiles := newCurrentRaidProfileBatch(s, profileCtx)
+		if err := s.sendCurrentRuntimeRaidProfilesWithBatchForActors(session, state, profiles, nil); err != nil {
+			return s.currentRaidProfileRequestError(session, err)
 		}
 		if err := s.sendGameUpperRawClassCodec(session, uint16(dnfenum.CmdPacketRequestRaidInfo), reply, 1, true); err != nil {
 			return err
@@ -391,7 +396,7 @@ func (s *Service) handleOnlineRequestRaidInfo(session *gameSession, body []byte)
 			if err := s.sendGameUpperRawClassCodec(session, raid.RaidMemberRefreshMsgID, roster, 0, true); err != nil {
 				return err
 			}
-			return s.sendCurrentRuntimeRaidEntryCost(session, state)
+			return s.sendCurrentRuntimeRaidEntryCostWithBatch(session, state, &currentRaidAdmissionBatch{ctx: profiles.ctx})
 		}
 		return nil
 	}
@@ -410,7 +415,13 @@ func (s *Service) handleOnlineRequestRaidInfo(session *gameSession, body []byte)
 // This is read-only visibility of an existing directory object, not authority
 // to mutate it. Historical layouts retain their members-only behavior.
 func (s *Service) currentRaidInfoVisible(session *gameSession, state runtimeRaidState) bool {
-	if s.options.currentClientVersion != "official-24.9" || !state.CurrentLayout || session == nil || !s.currentRaidAuthenticated(session) {
+	return s.currentRaidInfoContextVisible(session, state) && s.currentRaidAuthenticated(session)
+}
+
+// Routing only. Callers must also supply either currentRaidAuthenticated or
+// this broadcast's repository-derived owner and exact live binding proof.
+func (s *Service) currentRaidInfoContextVisible(session *gameSession, state runtimeRaidState) bool {
+	if s == nil || s.options.currentClientVersion != "official-24.9" || !state.CurrentLayout || session == nil || session.channel.ID <= 0 || session.channel.ID > 255 {
 		return false
 	}
 	route, supported := currentRaidRouteForChannel(int(session.channel.Type))
@@ -553,7 +564,7 @@ func (s *Service) handleOnlineStartRaid(session *gameSession, typ uint16, body [
 		s.logGameEvent(session, "game-raid-start-rejected", "source_char_id", sourceID, "error", err)
 	}
 	if !ok {
-		return s.sendRaidCommandFailure(session, typ)
+		return s.sendRaidStartRejection(session, typ, err)
 	}
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
@@ -800,7 +811,7 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 					"max", currentRaidMemberMaximum(*state), "started", state.Started, "raid_key", state.RaidKey)
 			}
 		}
-		return runtimeRaidState{}, false, nil
+		return runtimeRaidState{}, false, &raidStartRejection{message: "请由团长确认攻坚队人数后开始攻坚"}
 	}
 	if state.Started {
 		if !s.currentRaidAuthenticated(session) || state.Battle == nil || state.Battle.MemberAccounts[sourceID] != s.accountIDForSession(session) || state.Battle.ChannelID != session.channel.ID || state.Battle.ChannelType != session.channel.Type {
@@ -812,34 +823,47 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 		}
 		return cloneRuntimeRaidState(*state), true, nil
 	}
-	soloBefore := make(map[uint16]bool, len(state.Members))
-	for _, member := range state.Members {
-		soloBefore[member.CharID] = member.OrdinaryPartySolo
+	membersBefore := append([]runtimeRaidMemberState(nil), state.Members...)
+	preserveSolo := s.options.currentClientVersion == "official-24.9" && runtimeRaidKeepsUneditedSolos(*state)
+	var startProjection runtimeRaidState
+	if preserveSolo {
+		// Automatic admission seats do not request an ordinary party. Resolve
+		// actual parties and explicit recruiting placements before start changes
+		// the client projection from recruiting to active.
+		var intentErr error
+		startProjection, intentErr = s.prepareCurrentRaidStartPartyIntent(*state)
+		if intentErr != nil {
+			s.logGameEvent(session, "game-raid-start-party-intent-rejected", "raid_key", state.RaidKey, "reason", intentErr)
+			return runtimeRaidState{}, false, &raidStartRejection{message: "编队状态已变化，请重新确认队伍，每队最多4人", cause: intentErr}
+		}
 	}
 	startCommitted := false
 	defer func() {
 		if startCommitted {
 			return
 		}
-		// normalize is also used directly by other projection tests. Preserve
-		// its clear-on-success contract while making a rejected start atomic for
-		// the presentation marker.
-		for i := range state.Members {
-			state.Members[i].OrdinaryPartySolo = soloBefore[state.Members[i].CharID]
-		}
+		state.Members = membersBefore
 	}()
+	if preserveSolo {
+		state.Members = append([]runtimeRaidMemberState(nil), startProjection.Members...)
+	}
 	if normalizeRuntimeRaidMemberGroups(state) {
 		s.logGameEvent(session, "game-raid-member-groups-normalized",
 			"raid_key", state.RaidKey,
 			"member_count", len(state.Members),
 			"source", "raid_start_default_group_assignment")
 	}
+	if preserveSolo {
+		for i := range state.Members {
+			state.Members[i].OrdinaryPartySolo = startProjection.Members[i].OrdinaryPartySolo
+		}
+	}
 	if runtimeRaidHasOversizedGroup(*state) {
 		if session != nil {
 			s.logGameEvent(session, "game-raid-start-probe", "reason", "oversized_group",
 				"members", len(state.Members), "raid_key", state.RaidKey)
 		}
-		return runtimeRaidState{}, false, nil
+		return runtimeRaidState{}, false, &raidStartRejection{message: "每个队伍最多编入4人，请调整编队"}
 	}
 	seen := make(map[uint16]bool, len(state.Members))
 	for _, member := range state.Members {
@@ -859,7 +883,7 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 					"member_char_id", member.CharID, "raid_key", state.RaidKey,
 					"current_layout", state.CurrentLayout, "seat_raid", seat.Raid.RaidKey)
 			}
-			return runtimeRaidState{}, false, nil
+			return runtimeRaidState{}, false, &raidStartRejection{message: "队员尚未重新连接，请等待队员归队", members: []uint16{member.CharID}}
 		}
 		seen[member.CharID] = true
 	}
@@ -886,9 +910,11 @@ func (s *Service) startRuntimeRaidWithEntryCost(session *gameSession) (runtimeRa
 	if err != nil || !allowed {
 		return runtimeRaidState{}, false, err
 	}
-	// The solo chip is presentation state. Reset it only after every admission
-	// gate has passed; a rejected start must leave the existing icon untouched.
-	resetRuntimeRaidSoloProjection(state)
+	// Normal current-client starts retain the resolved solo/explicit-placement
+	// intent. Other layouts keep their historical reset after all admission gates.
+	if !preserveSolo {
+		resetRuntimeRaidSoloProjection(state)
+	}
 	state.Started = true
 	state.Battle = battle
 	if battle != nil {
@@ -960,6 +986,9 @@ func (s *Service) moveRuntimeRaidMember(sourceID uint16, memberID uint16, target
 	if state.RouteOrRaidType == 2 && state.Started {
 		return runtimeRaidState{}, false, false
 	}
+	if state.RouteOrRaidType != 2 && runtimeRaidGroupAssignedCount(*state, targetGroup, memberID) >= runtimeRaidGroupSize {
+		return runtimeRaidState{}, false, false
+	}
 	if state.RouteOrRaidType == 2 {
 		for i := range state.Members {
 			if state.Members[i].CharID != memberID && state.Members[i].GroupIndex == targetGroup {
@@ -1025,7 +1054,9 @@ func (s *Service) broadcastRuntimeRaidProjectionWithAppearance(state runtimeRaid
 	profileCtx, cancelProfiles := context.WithTimeout(context.Background(), createWriteTimeout)
 	defer cancelProfiles()
 	profiles := newCurrentRaidProfileBatch(s, profileCtx)
-	admission := &currentRaidAdmissionBatch{}
+	// Ownership already read for the profiles belongs to this same broadcast.
+	// Inventory remains a fresh committed read; never retain either across calls.
+	admission := &currentRaidAdmissionBatch{ctx: profiles.ctx}
 	for _, member := range state.Members {
 		session, ok := s.onlineGameSession(member.CharID)
 		if !ok {
@@ -1286,6 +1317,9 @@ func runtimeRaidPartyGroups(state runtimeRaidState) [][]runtimeRaidMemberState {
 	groups := make([][]runtimeRaidMemberState, 0, runtimeRaidMaxGroups)
 	byGroup := make(map[byte][]runtimeRaidMemberState)
 	for _, member := range members {
+		if runtimeRaidKeepsUneditedSolos(state) && member.OrdinaryPartySolo {
+			continue
+		}
 		group := member.GroupIndex
 		if group == 0 {
 			group = runtimeRaidDefaultGroup
@@ -1304,10 +1338,17 @@ func runtimeRaidPartyGroups(state runtimeRaidState) [][]runtimeRaidMemberState {
 	return groups
 }
 
-// GroupIndex 0 is the native "unassigned/default group" marker. Existing
-// party projection and capacity checks already interpret it as the default
-// group. Materialize that intent when a member joins or before the first raid
-// start so the raid roster and raidEntry compare the same concrete group.
+func runtimeRaidKeepsUneditedSolos(state runtimeRaidState) bool {
+	return state.CurrentLayout && state.RouteOrRaidType <= 1 && state.CurrentUIFlags[0] == 0
+}
+
+func runtimeRaidMemberReservesOrdinaryGroup(state runtimeRaidState, member runtimeRaidMemberState) bool {
+	return !runtimeRaidKeepsUneditedSolos(state) || !member.OrdinaryPartySolo || member.RecruitingPlacementExplicit
+}
+
+// GroupIndex 0 is normalized only for admission's canonical seat identity.
+// A concrete seat alone never requests an ordinary party: normal current-client
+// starts independently retain the resolved solo/explicit-placement intent.
 func normalizedRuntimeRaidGroup(group byte) byte {
 	if group == 0 {
 		return runtimeRaidDefaultGroup
@@ -1319,6 +1360,9 @@ func runtimeRaidGroupAssignedCount(state runtimeRaidState, group byte, exclude u
 	count := 0
 	for _, member := range state.Members {
 		if member.CharID == exclude {
+			continue
+		}
+		if !runtimeRaidMemberReservesOrdinaryGroup(state, member) {
 			continue
 		}
 		if normalizedRuntimeRaidGroup(member.GroupIndex) == group {
@@ -1398,9 +1442,9 @@ func runtimeRaidMemberPlacementLimits(state runtimeRaidState) (byte, int) {
 // reward-frozen admission set. Raw group 0 is a real pending placement: it is
 // materialized in the anchor group, including when the normalized group already
 // matches, and occupies capacity while being planned.
-func planRuntimeRaidGroupSynchronization(raid runtimeRaidState, party alignedcmd.PartyState) ([]runtimeRaidMemberState, bool) {
+func planRuntimeRaidGroupSynchronization(raid runtimeRaidState, party alignedcmd.PartyState, newlyFormed ...bool) ([]runtimeRaidMemberState, bool) {
 	if raid.Started && raid.CurrentLayout && raid.RouteOrRaidType <= 1 {
-		return planStartedRaidOrdinaryPartyGroup(raid, party)
+		return planStartedRaidOrdinaryPartyGroup(raid, party, newlyFormed...)
 	}
 	members := runtimePartyMembers(party)
 	if party.UserID == 0 || len(members) < 2 {
@@ -1415,6 +1459,25 @@ func planRuntimeRaidGroupSynchronization(raid runtimeRaidState, party alignedcmd
 		return nil, false
 	}
 	anchorGroup := normalizedRuntimeRaidGroup(raid.Members[anchorIndex].GroupIndex)
+	partyIDs := make(map[uint16]bool, len(members))
+	for _, member := range members {
+		partyIDs[member.UserID] = true
+	}
+	if runtimeRaidKeepsUneditedSolos(raid) && len(newlyFormed) > 0 && newlyFormed[0] && !raid.Members[anchorIndex].RecruitingPlacementExplicit {
+		anchorGroup = 0
+		for group := byte(1); group <= maximum; group++ {
+			reserved := 0
+			for _, member := range raid.Members {
+				if !partyIDs[member.CharID] && runtimeRaidMemberReservesOrdinaryGroup(raid, member) && normalizedRuntimeRaidGroup(member.GroupIndex) == group {
+					reserved++
+				}
+			}
+			if reserved == 0 {
+				anchorGroup = group
+				break
+			}
+		}
+	}
 	if anchorGroup < 1 || anchorGroup > maximum {
 		return nil, false
 	}
@@ -1432,13 +1495,9 @@ func planRuntimeRaidGroupSynchronization(raid runtimeRaidState, party alignedcmd
 	if occupied+moversToAdd > capacity {
 		return nil, false
 	}
-	partyIDs := make(map[uint16]bool, len(members))
-	for _, member := range members {
-		partyIDs[member.UserID] = true
-	}
 	used := make(map[byte]bool)
 	for _, member := range raid.Members {
-		if partyIDs[member.CharID] || normalizedRuntimeRaidGroup(member.GroupIndex) != anchorGroup {
+		if partyIDs[member.CharID] || !runtimeRaidMemberReservesOrdinaryGroup(raid, member) || normalizedRuntimeRaidGroup(member.GroupIndex) != anchorGroup {
 			continue
 		}
 		if int(member.SlotOrder) < capacity {
@@ -1499,19 +1558,28 @@ func currentRaidMemberActiveForPartySync(raid *runtimeRaidState, charID uint16) 
 // The anchor keeps its explicit group; the full placement is planned on a copy
 // before any live member changes. Frozen Battle.MemberGroups and members with
 // active dungeon participation are never changed here.
-func (s *Service) synchronizeOrdinaryPartyRaidGroups(party alignedcmd.PartyState, source string) bool {
-	if s == nil || s.options.currentClientVersion != "official-24.9" || party.PartyID <= 0 || party.UserID == 0 {
+func (s *Service) synchronizeOrdinaryPartyRaidGroups(partyState alignedcmd.PartyState, source string, expected party.RuntimePartySnapshot) bool {
+	if s == nil || s.options.currentClientVersion != "official-24.9" || partyState.PartyID <= 0 || partyState.UserID == 0 {
 		return false
 	}
-	members := runtimePartyMembers(party)
-	if len(members) < 2 {
+	manager := s.runtimePartyManagerForService()
+	if int(expected.ID) != partyState.PartyID || expected.Leader != partyState.UserID || manager.WithSnapshot(expected, func() error { return nil }) != nil {
 		return false
+	}
+	members := runtimePartyMembers(partyState)
+	if len(members) != len(expected.Members) || len(members) < 2 {
+		return false
+	}
+	for i, member := range runtimePartyMembers(expected.StateFor(expected.Leader)) {
+		if member.UserID != members[i].UserID || member.Slot != members[i].Slot {
+			return false
+		}
 	}
 	// Party membership owns the solo marker independently of whether this
 	// party can be materialized as one raid attack group. Refresh before any
 	// group-sync eligibility check so a valid join cannot leave a stale chip.
 	soloSnapshots := s.updateCurrentRaidSoloForPartyMembers(
-		runtimePartySoloMemberIDs(alignedcmd.PartyState{}, party),
+		runtimePartySoloMemberIDs(alignedcmd.PartyState{}, partyState),
 		false,
 	)
 	groupBroadcasted := false
@@ -1545,7 +1613,7 @@ func (s *Service) synchronizeOrdinaryPartyRaidGroups(party alignedcmd.PartyState
 		accounts[member.UserID] = account
 	}
 	s.raidMu.Lock()
-	raid := s.runtimeRaidByMemberLocked(party.UserID)
+	raid := s.runtimeRaidByMemberLocked(partyState.UserID)
 	if raid == nil {
 		s.raidMu.Unlock()
 		return false
@@ -1562,23 +1630,43 @@ func (s *Service) synchronizeOrdinaryPartyRaidGroups(party alignedcmd.PartyState
 			}
 		}
 	}
-	candidate, ok := planRuntimeRaidGroupSynchronization(*raid, party)
+	planning := s.currentRaidLivePartyProjection(cloneRuntimeRaidState(*raid))
+	candidate, ok := planRuntimeRaidGroupSynchronization(planning, partyState, len(expected.Members) == 2)
 	if !ok {
 		s.raidMu.Unlock()
 		return false
 	}
-	raid.Members = candidate
+	partyMemberIDs := make(map[uint16]bool, len(members))
+	for _, member := range members {
+		partyMemberIDs[member.UserID] = true
+	}
+	for i := range candidate {
+		if !partyMemberIDs[candidate[i].CharID] {
+			// Live solo flags are planning input only for unrelated members;
+			// an ordinary-party join must not commit their presentation state.
+			candidate[i] = raid.Members[i]
+		}
+	}
+	// Keep the manager revision stable only for this short raid-state commit.
+	// An older two-member join result cannot split a newer three-member party.
+	if manager.WithSnapshot(expected, func() error {
+		raid.Members = candidate
+		return nil
+	}) != nil {
+		s.raidMu.Unlock()
+		return false
+	}
 	committedRaidKey = raid.RaidKey
 	snapshot := cloneRuntimeRaidState(*raid)
 	s.raidMu.Unlock()
 	var anchorSession *gameSession
-	if anchor, found := s.onlineGameSession(party.UserID); found {
+	if anchor, found := s.onlineGameSession(partyState.UserID); found {
 		anchorSession = anchor
 		s.logGameEvent(anchor, "game-party-raid-groups-synchronized",
 			"source", source,
-			"party_id", party.PartyID,
+			"party_id", partyState.PartyID,
 			"raid_key", snapshot.RaidKey,
-			"anchor_group", normalizedRuntimeRaidGroup(snapshot.Members[runtimeRaidMemberIndex(snapshot, party.UserID)].GroupIndex),
+			"anchor_group", normalizedRuntimeRaidGroup(snapshot.Members[runtimeRaidMemberIndex(snapshot, partyState.UserID)].GroupIndex),
 			"member_count", len(members))
 	}
 	err := s.broadcastRuntimeRaidRoster(snapshot)
@@ -1594,6 +1682,9 @@ func (s *Service) synchronizeOrdinaryPartyRaidGroups(party alignedcmd.PartyState
 func runtimeRaidHasOversizedGroup(state runtimeRaidState) bool {
 	counts := make(map[byte]int)
 	for _, member := range state.Members {
+		if runtimeRaidKeepsUneditedSolos(state) && member.OrdinaryPartySolo {
+			continue
+		}
 		group := member.GroupIndex
 		if group == 0 {
 			group = runtimeRaidDefaultGroup
@@ -1621,8 +1712,13 @@ func runtimeRaidGroupPartyState(state runtimeRaidState, members []runtimeRaidMem
 		partyState.NameBytes = []byte("raid")
 	}
 	for _, member := range members {
+		slot := byte(0)
+		if runtimeRaidKeepsUneditedSolos(state) {
+			slot = member.SlotOrder
+		}
 		partyState.Members = append(partyState.Members, alignedcmd.PartyMemberState{
 			UserID:    member.CharID,
+			Slot:      slot,
 			UserState: firstByte(member.UserState, 1),
 			HPPercent: firstByte(member.HPPercent, 100),
 			MPPercent: firstByte(member.MPPercent, 100),

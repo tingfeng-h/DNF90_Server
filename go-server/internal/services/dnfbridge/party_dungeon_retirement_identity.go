@@ -26,6 +26,24 @@ func ordinaryRoomSeedRetirementEnabled() bool {
 	}
 }
 
+// Captured at the real return commit, while the exact runtime still owns the
+// session. Room seeds change during an ordinary run; they are not run IDs.
+type currentDungeonPartyRetirement struct {
+	instance *dungeonPartyInstance
+	token    uint64
+	key      dungeonPartyRunKey
+	keyValid bool
+}
+
+func captureCurrentDungeonPartyRetirementLocked(session *gameSession, runtime *runtimeDungeonState) {
+	if session == nil || runtime == nil || session.dungeon.runtime != runtime || runtime.partyInstance == nil {
+		return
+	}
+	session.dungeonPartyRunMu.Lock()
+	defer session.dungeonPartyRunMu.Unlock()
+	session.dungeon.partyRetirement = currentDungeonPartyRetirement{runtime.partyInstance, session.dungeon.runToken, session.dungeonPartyRun, session.dungeonPartyRunValid}
+}
+
 // The same lobby can start another dungeon without changing PartyID. A return
 // callback runs after releasing its old runtime, so membership alone cannot
 // distinguish that callback from a return belonging to the new run.
@@ -68,10 +86,15 @@ func (s *Service) withCurrentDungeonPartyRetirement(identity boundGameSessionCha
 		sameRaidRun := current.RaidKey != 0 && current.RaidKey == retired.RaidKey &&
 			current.RaidInstanceID != "" && current.RaidInstanceID == retired.RaidInstanceID &&
 			current.RaidRunID != "" && current.RaidRunID == retired.RaidRunID
+		// 上游新增：回城提交那一刻捕获的实例/令牌证明（同一大厅连开两把时，
+		// 仅凭成员关系无法区分新一局的回调）。
+		proof := session.dungeon.partyRetirement
+		committedOwner := session.dungeon.runtime == nil && proof.instance == instance &&
+			proof.token == session.dungeon.runToken && proof.keyValid && proof.key == current
 		// 过门会替换房间 Seed，而 instance.key 永远停在进图首房。跑团靠冻结的
 		// 报名标识认场；普通副本没有这个标识，改用「当前仍持有该副本实例」或
 		// 「这个 Seed 是本实例在落房时登记过的」，既放行合法过图/断线退队，又挡住其它一局的陈旧回调。
-		if sameRaidRun || activeInstanceMatches || (seedOwnedByInstance && current == probeKey) {
+		if committedOwner || sameRaidRun || activeInstanceMatches || (seedOwnedByInstance && current == probeKey) {
 			current.Seed, retired.Seed = 0, 0
 		}
 		// Room coordinates legitimately advance inside the same instance.
