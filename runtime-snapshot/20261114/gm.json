@@ -1,0 +1,17 @@
+{
+  "listen": "127.0.0.1:18112",
+  "password": "<GM_PASSWORD>",
+  "registrationDsn": "dnf:<DB_PASSWORD>@tcp(10.253.90.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
+  "repositoryDsn": "dnf:<DB_PASSWORD>@tcp(10.253.90.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
+  "accountTable": "dnf90_web_accounts",
+  "databases": [
+    "dnf_local"
+  ],
+  "tablePrefix": "dnf",
+  "pvfPath": "/assets/Script.pvf",
+  "pvfSha256": "29b66dc9274915cb1c2eabc6373dd9cf003557a7afc12e6d9bc9985cd92d5ae4",
+  "itemIndexPath": "/runtime/item-index.json",
+  "gameApi": "http://10.0.4.9:17002/api/game/admin",
+  "gameToken": "<ADMIN_SECRET>",
+  "scanSeconds": 30
+}
