@@ -68,14 +68,47 @@ func (s *Service) allSameChannelPartyMembersOutsideDungeon(receiver *gameSession
 		if inDungeon || !currentPartyTownReturnSceneReady(memberSession) {
 			return false
 		}
+		if s.onlinePlayers != nil {
+			peerInfo, found := s.onlinePlayers.PlayerForCharacter(member.UserID)
+			if !found || peerInfo.Session != memberSession {
+				return false
+			}
+		}
 	}
 	return true
 }
 
+// sendRuntimePartyTownReturnRebind 在回城同屏 actor 重建完成后，按顺序执行：
+//  1. retireDungeonPartyAliasRecords（若本轮回城待决）：清理 owner=0 与非本机别名的旧 CPartyRecord；
+//  2. sendRuntimePartyPeerEndpointInfo（op11）：将对端 IP 与端口写进新创建的城镇 CUser(+0x4B4..+0x4BC)；
+//  3. sendRuntimePartyRosterLocal（op153 + op9）：原位绑定 [town_actor+0x4C8] 并触发有效端点 P2P 重连。
+func (s *Service) sendRuntimePartyTownReturnRebind(
+	session *gameSession,
+	state alignedcmd.PartyState,
+	source string,
+) error {
+	if s == nil || session == nil || session.selectedCharacterID == 0 {
+		return nil
+	}
+	receiverState := stateForRuntimePartyReceiver(state, session.selectedCharacterID)
+	aliasRetireConsumed := false
+	if bug1RetireDungeonPartyAliasesEnabled() && consumeDungeonReturnAliasRetirePending(session) {
+		aliasRetireConsumed = true
+		if err := s.retireDungeonPartyAliasRecords(session, runtimePartyMembers(receiverState), source+"_retire_aliases"); err != nil {
+			return err
+		}
+	}
+	if aliasRetireConsumed && receiverState.PartyID > 0 && len(runtimePartyMembers(receiverState)) >= 2 {
+		if _, err := s.sendRuntimePartyPeerEndpointInfo(session, receiverState, s.partyFormationOrder()); err != nil {
+			return err
+		}
+	}
+	return s.sendRuntimePartyRosterLocal(session, receiverState, source)
+}
+
 // retireDungeonPartyAliasRecords 在回城后首次重建城镇组队投影（sendRuntimePartyRosterLocal）之前，
 // 趁 [town_local_actor+0x4C8] 仍为 0（before==0 && after==0，不会触发 0x201786B 队伍解散），
-// 把副本作用域（owner = 0）与城镇作用域（owner = channel）的旧 op9 记录逐条用 kind3 静默清槽：
-// **先同屏非本队单人角色（如图内已退队者）、再本队队友、最后自己**。
+// 把副本作用域（owner = 0）与城镇作用域（owner = channel）的非本机旧 op9 记录逐条用 kind3 静默清槽。
 func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members []alignedcmd.PartyMemberState, source string) error {
 	if s == nil || receiver == nil || receiver.selectedCharacterID == 0 {
 		return nil
@@ -125,7 +158,6 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 			ordered = append(ordered, cand.CharacterID)
 		}
 	}
-	var handoffPeer *gameSession
 	for _, member := range members {
 		if member.UserID == 0 || member.UserID == receiver.selectedCharacterID || seen[member.UserID] {
 			continue
@@ -133,11 +165,6 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		seen[member.UserID] = true
 		peerIDs = append(peerIDs, member.UserID)
 		ordered = append(ordered, member.UserID)
-		if handoffPeer == nil {
-			if peerSession, ok := s.onlineGameSession(member.UserID); ok && peerSession != nil {
-				handoffPeer = peerSession
-			}
-		}
 	}
 	if !seen[receiver.selectedCharacterID] {
 		seen[receiver.selectedCharacterID] = true
@@ -163,8 +190,7 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 	}
 
 	// 1. 副本作用域（owner = 0）：仅退役已退队散人（nonPartyIDs）与本机（self），
-	// 不对当前仍在队内的队友（peerIDs）发送 kind3(peerID, 0)，避免在城镇态下穿透到
-	// 0x29733B0 误伤同区队友模型或清零 +0x4C8。
+	// 不对当前仍在队内的队友（peerIDs）发送 kind3(peerID, 0)，避免穿透误伤同区队友模型。
 	for _, id := range nonPartyIDs {
 		if err := retire(id, currentSceneObjectContext); err != nil {
 			return err
@@ -174,34 +200,25 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		return err
 	}
 
-	// 2. 城镇作用域（owner = channel）：四步零解散换绑。
+	// 2. 城镇作用域（owner = channel）：
+	// 若当前仍在多人队伍中，绝不退役 record(self, channel) 且绝不使用 handoffPeer 借槽（避免触发
+	// 0x0201786B 静默解散与清零 [actor+0x4C8]），仅清理 nonPartyIDs 与 peerIDs 的别名记录；
+	// 随后由 sendRuntimePartyRosterLocal 的 kind0 原位更新 record(self, channel) 并通过
+	// .prsafe (0x06EC5334..0x06EC536B) 把本机与所有队友的新 town actor 绑回 record(self, channel)。
 	if channel := currentClientSelectedChannel(receiver); channel != currentSceneObjectContext {
 		state := stateForRuntimePartyReceiver(s.townCopresenceActorPartyState(receiver), receiver.selectedCharacterID)
-		selection := currentPartyFrameOwnerSelection{Mode: currentPartyFrameOwnerExplicit, Owner: channel}
-		if handoffPeer != nil && state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
-			// Step A：把 [local_actor+0x4C8] 暂存绑定到空槽的 record(handoffPeer, channel)。
-			if _, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, handoffPeer, state, source+"_channel_handoff_peer", nil, selection); err != nil {
+		for _, id := range nonPartyIDs {
+			if err := retire(id, channel); err != nil {
 				return err
 			}
-			// Step B：趁指针停在 handoffPeer，静默清非本队散人与本机旧记录。
-			for _, id := range nonPartyIDs {
+		}
+		if state.PartyID > 0 && len(runtimePartyMembers(state)) >= 2 {
+			for _, id := range peerIDs {
 				if err := retire(id, channel); err != nil {
 					return err
 				}
-			}
-			if err := retire(receiver.selectedCharacterID, channel); err != nil {
-				return err
-			}
-			// Step C：重建 record(self, channel)，把本机与队友 actor 绑回。
-			if _, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, source+"_channel_rebind_self", nil, selection); err != nil {
-				return err
 			}
 		} else {
-			for _, id := range nonPartyIDs {
-				if err := retire(id, channel); err != nil {
-					return err
-				}
-			}
 			if err := retire(receiver.selectedCharacterID, channel); err != nil {
 				return err
 			}
@@ -214,6 +231,6 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 		"retired_peers", len(ordered)-1,
 		"owner_channel", currentSceneObjectContext,
 		"switch", bug1RetireDungeonPartyAliasesEnv,
-		"reason", "kind3_owner0_and_channel_peers_then_self_while_town_actor_unlinked")
+		"reason", "kind3_owner0_and_channel_peers_preserving_self_channel_record")
 	return nil
 }

@@ -860,6 +860,11 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 		s.broadcastTownPlayerAreaChange(playerInfo, oldOthers, partyStateBefore)
 	}
 	s.broadcastTownPlayerEnter(playerInfo, newOthers)
+	session.townMu.Lock()
+	if session.selectedCharacterID == characterID && session.townPositionSnapshot.PositionValid {
+		session.townSceneReadyCharacterID = characterID
+	}
+	session.townMu.Unlock()
 	partyStateAfter := s.townCopresenceActorPartyState(session)
 	partyPeers := make([]onlinePlayerInfo, 0, len(newOthers)+len(runtimePartyMembers(partyStateAfter)))
 	partyPeers = append(partyPeers, newOthers...)
@@ -897,16 +902,7 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 				"error", err)
 		}
 		if s.allSameChannelPartyMembersOutsideDungeon(session, partyStateAfter) {
-			if bug1RetireDungeonPartyAliasesEnabled() && consumeDungeonReturnAliasRetirePending(session) {
-				if err := s.retireDungeonPartyAliasRecords(session, runtimePartyMembers(partyStateAfter), source+"_dungeon_return_retire_aliases"); err != nil {
-					s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
-						"char_id", characterID,
-						"party_id", partyStateAfter.PartyID,
-						"source", source,
-						"error", err)
-				}
-			}
-			if err := s.sendRuntimePartyRosterLocal(session, partyStateAfter, source+"_dungeon_return_roster_rebind"); err != nil {
+			if err := s.sendRuntimePartyTownReturnRebind(session, partyStateAfter, source+"_dungeon_return_roster_rebind"); err != nil {
 				s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
 					"char_id", characterID,
 					"party_id", partyStateAfter.PartyID,
@@ -923,12 +919,7 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 					if peerState.PartyID <= 0 || peerState.PartyID != partyStateAfter.PartyID {
 						return nil
 					}
-					if bug1RetireDungeonPartyAliasesEnabled() && consumeDungeonReturnAliasRetirePending(peer.Session) {
-						if err := s.retireDungeonPartyAliasRecords(peer.Session, runtimePartyMembers(peerState), source+"_dungeon_return_peer_retire_aliases"); err != nil {
-							return err
-						}
-					}
-					return s.sendRuntimePartyRosterLocal(peer.Session, peerState, source+"_dungeon_return_peer_roster_rebind")
+					return s.sendRuntimePartyTownReturnRebind(peer.Session, peerState, source+"_dungeon_return_peer_roster_rebind")
 				})
 			}
 		} else {

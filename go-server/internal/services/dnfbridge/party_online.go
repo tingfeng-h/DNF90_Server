@@ -1147,6 +1147,10 @@ func (s *Service) handleOnlineResponsePeer(session *gameSession, typ uint16, bod
 	joiner, anchor := session, targetSession
 	if recordedRequest.JoinerID == targetIdentity.character && recordedRequest.AnchorID == acceptorIdentity.character {
 		joiner, anchor = targetSession, session
+	} else if recordedRequest.AnchorID != 0 && recordedRequest.AnchorID != targetIdentity.character {
+		if leaderIdentity, leaderOK := s.onlineGameSessionCharacterSnapshot(recordedRequest.AnchorID); leaderOK && leaderIdentity.session != nil {
+			anchor = leaderIdentity.session
+		}
 	}
 	if invitePartyID := runtimePartyStateSnapshot(joiner).PartyID; invitePartyID > 0 {
 		if targetPartyID := runtimePartyStateSnapshot(anchor).PartyID; invitePartyID != targetPartyID {
@@ -2264,7 +2268,7 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 	// 2026-09-27：这个判据必须用**未截断**的 int 频道号（客户端场景频道可能是 508
 	// 这种 >255 的值，任何 u8 都不等于它 ⇒ 那些行必须一律带身份块）。
 	localChannelID := currentClientSelectedChannelID(receiver)
-	body := buildCurrentSceneOp9ActorPartyDisplayBodyForProfile(
+	body := buildCurrentSceneOp9ActorPartyDisplayBodyForProfileWithPartyMax(
 		objectKey,
 		character,
 		hasCharacter,
@@ -2273,6 +2277,7 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 		localChannelID,
 		projections,
 		leaderSlot,
+		effectivePartyDisplayMaxMembers(state),
 		s.options.currentClientVersion == "official-24.9",
 		s.currentSceneActorRoute(),
 	)
@@ -2422,6 +2427,16 @@ func runtimePartyMemberBySlot(state alignedcmd.PartyState, slot byte) (alignedcm
 		}
 	}
 	return alignedcmd.PartyMemberState{}, false
+}
+
+// effectivePartyDisplayMaxMembers 取 NOTI9 记录头要写的人数上限：客户端只认 1..4，
+// 未设置（0）按客户端默认的 4 人。
+func effectivePartyDisplayMaxMembers(state alignedcmd.PartyState) byte {
+	maxMembers := state.MaxMembers
+	if maxMembers < 1 || maxMembers > 4 {
+		maxMembers = 4
+	}
+	return maxMembers
 }
 
 func runtimePartyMembers(state alignedcmd.PartyState) []alignedcmd.PartyMemberState {

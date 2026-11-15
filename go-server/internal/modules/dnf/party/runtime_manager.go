@@ -473,15 +473,16 @@ func (m *RuntimePartyManager) RecordOnlinePeerRequest(recipient uint16, recipien
 	}
 	if mode == 0 || mode == 12 {
 		if targetParty != nil && (sourceParty == nil || sourceParty.count() == 1) {
-			if targetParty.leader != recipient {
+			if targetParty.leader != recipient || targetParty.full() {
 				return RuntimePeerRequest{}, false
 			}
 			request.JoinerID, request.AnchorID = requester, recipient
 			request.PartyID = targetParty.id
 		} else if sourceParty != nil {
-			if sourceParty.leader != requester || targetParty != nil {
+			if targetParty != nil || sourceParty.full() {
 				return RuntimePeerRequest{}, false
 			}
+			request.AnchorID = sourceParty.leader
 			request.PartyID = sourceParty.id
 		}
 	} else if sourceParty != nil {

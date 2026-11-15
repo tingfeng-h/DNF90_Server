@@ -96,7 +96,7 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			}
 			continue
 		}
-		if err := s.sendRuntimePartyRosterLocal(receiver, stateForRuntimePartyReceiver(state, receiver.selectedCharacterID), source+"_party_roster"); err != nil {
+		if err := s.sendRuntimePartyTownReturnRebind(receiver, state, source+"_party_roster"); err != nil {
 			return err
 		}
 	}
