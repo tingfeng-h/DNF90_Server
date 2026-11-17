@@ -196,21 +196,16 @@ func (s *Service) settleRuntimePartyOnDungeonCompletionReturn(
 	// 4. "一起回城"的最后一环。既有收口点，不新增机制：
 	//    `currentPartyTownReturnSceneReady` 会对每个成员要求"没有待决回城、没有副本
 	//    运行时、城镇场景就绪"，任何一个没到位就整条放弃（`party_town_return.go:28-32`）。
-	// 多人队伍的同屏与重绑已由 publishCompletedDungeonReturnTownPresence ->
-	// rebindTownCopresenceAfterDungeonReturn 在全员到位时统一执行一次；这里仅对单人队伍执行，
-	// 避免多人队伍二次 sendRuntimePartyTownReturnRebind 冲掉队长已建立的 P2P 握手槽位。
-	if len(members) == 1 {
-		if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(
-			session,
-			source+"_party_town_copresence_after_completed_return",
-		); err != nil {
-			s.logGameEvent(session, "game-party-dungeon-completion-return-copresence-failed",
-				"source", source,
-				"party_id", state.PartyID,
-				"leader_char_id", leaderID,
-				"leaving_char_id", leavingCharacterID,
-				"error", err)
-		}
+	if err := s.rebuildRuntimePartyTownCoPresenceAfterReturn(
+		session,
+		source+"_party_town_copresence_after_completed_return",
+	); err != nil {
+		s.logGameEvent(session, "game-party-dungeon-completion-return-copresence-failed",
+			"source", source,
+			"party_id", state.PartyID,
+			"leader_char_id", leaderID,
+			"leaving_char_id", leavingCharacterID,
+			"error", err)
 	}
 
 	// 5. 服务端扇出（默认档 `on`）：把仍在同一实例内、**已经结算完**的队员一起送回城镇。

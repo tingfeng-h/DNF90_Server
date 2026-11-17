@@ -96,9 +96,8 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 	if len(runtimePartyMembers(next)) < 2 {
 		s.closeRuntimePartyUDPRelay(int(before.ID))
 	} else {
-		// 中途退图后整把重建：内置中继只关 D 的 leg、幸存者 leg 的 learnedEndpoint 仍是副本态；
-		// 远端中继还会因 freshWindow 缓存跳过回城同步。
-		s.rebuildRuntimePartyUDPRelay(next)
+		// 严禁在副本内重建中继：CloseParty 会掐断幸存者已建立的 UDP 通道。
+		s.syncRuntimePartyUDPRelay(next)
 	}
 	beforeLeaderState := before.StateFor(before.Leader)
 	beforeMembers := runtimePartyMembers(beforeLeaderState)
@@ -329,15 +328,6 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 			if err != nil || !sent {
 				return false, err
 			}
-		}
-	} else {
-		// 副本内 slotActors 全员非空、.gld127 校验通过（不会 P2P->closeAll），
-		// 先复位 record(self,ch) 槽位，让紧接着的 selfSent 必然命中 oldUser != newUser。
-		if err := s.resetSelfChannelRecordBeforeDungeonSurvivorRoster(receiver, state, owner, current); err != nil {
-			return false, err
-		}
-		if !current() {
-			return false, nil
 		}
 	}
 	selfSent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, "member_giveup_survivor_dungeon_roster", nil, selection)

@@ -909,7 +909,26 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 				"error", err)
 		}
 		if s.allSameChannelPartyMembersOutsideDungeon(session, partyStateAfter) {
-			s.orchestratePartyTownReturnRebindLeaderFirst(session, partyStateAfter, partyPeers, source)
+			if err := s.sendRuntimePartyTownReturnRebind(session, partyStateAfter, source+"_dungeon_return_roster_rebind"); err != nil {
+				s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
+					"char_id", characterID,
+					"party_id", partyStateAfter.PartyID,
+					"source", source,
+					"error", err)
+			}
+			for i := range partyPeers {
+				peer := partyPeers[i]
+				if peer.Session == nil {
+					continue
+				}
+				s.queueTownPeerDelivery(peer, source+"_dungeon_return_peer_roster_rebind", nil, func() error {
+					peerState := s.townCopresenceActorPartyState(peer.Session)
+					if peerState.PartyID <= 0 || peerState.PartyID != partyStateAfter.PartyID {
+						return nil
+					}
+					return s.sendRuntimePartyTownReturnRebind(peer.Session, peerState, source+"_dungeon_return_peer_roster_rebind")
+				})
+			}
 		} else {
 			for i := range partyPeers {
 				peer := partyPeers[i]
@@ -1299,91 +1318,4 @@ func (s *Service) cleanupOnlinePlayer(session *gameSession) {
 	if len(others) > 0 {
 		s.broadcastTownPlayerLeave(session.selectedCharacterID, others)
 	}
-}
-
-// orchestratePartyTownReturnRebindLeaderFirst 按客户端的 P2P 握手角色顺序编排回城重绑：
-//   - 队长在 NOTI 9 里恒为 activeHandshake=0（被动应答方，重绑会把槽位重置为"被动等待"且不发 UDP 包）；
-//   - 非队长队员在 oldMemberCount==1 -> newMemberCount>=2 时为 activeHandshake=1（主动向队长发 UDP SYN）。
-//
-// 因此必须让队长先完成重绑进入被动监听，随后非队长队员再重绑发起主动握手。
-func (s *Service) orchestratePartyTownReturnRebindLeaderFirst(
-	session *gameSession,
-	partyStateAfter alignedcmd.PartyState,
-	partyPeers []onlinePlayerInfo,
-	source string,
-) {
-	if s == nil || session == nil {
-		return
-	}
-	leaderID := partyStateAfter.UserID
-	var leaderPeer *onlinePlayerInfo
-	memberPeers := make([]onlinePlayerInfo, 0, len(partyPeers)+1)
-
-	for i := range partyPeers {
-		peer := partyPeers[i]
-		if peer.Session == nil {
-			continue
-		}
-		if peer.CharacterID == leaderID && session.selectedCharacterID != leaderID {
-			peerCopy := peer
-			leaderPeer = &peerCopy
-		} else {
-			memberPeers = append(memberPeers, peer)
-		}
-	}
-
-	dispatchMembers := func() {
-		for i := range memberPeers {
-			peer := memberPeers[i]
-			if peer.Session == nil {
-				continue
-			}
-			s.queueTownPeerDelivery(peer, source+"_dungeon_return_peer_roster_rebind", nil, func() error {
-				peerState := s.townCopresenceActorPartyState(peer.Session)
-				if peerState.PartyID <= 0 || peerState.PartyID != partyStateAfter.PartyID {
-					return nil
-				}
-				return s.sendRuntimePartyTownReturnRebind(peer.Session, peerState, source+"_dungeon_return_peer_roster_rebind")
-			})
-		}
-	}
-
-	// 情况 A：最后进城的就是队长本人（或队长不在同屏列表）→ 队长先同步重绑，再放队员。
-	if session.selectedCharacterID == leaderID || leaderPeer == nil {
-		if err := s.sendRuntimePartyTownReturnRebind(session, partyStateAfter, source+"_dungeon_return_roster_rebind"); err != nil {
-			s.logGameEvent(session, "game-dungeon-return-copresence-roster-failed",
-				"char_id", session.selectedCharacterID,
-				"party_id", partyStateAfter.PartyID,
-				"source", source,
-				"error", err)
-		}
-		dispatchMembers()
-		return
-	}
-
-	// 情况 B：最后进城的是队员 → 把本会话也放进待触发列表，先让队长重绑，再统一触发所有队员。
-	if s.onlinePlayers != nil {
-		if selfInfo, ok := s.onlinePlayers.PlayerForCharacter(session.selectedCharacterID); ok && selfInfo.Session == session {
-			memberPeers = append(memberPeers, selfInfo)
-		} else {
-			memberPeers = append(memberPeers, onlinePlayerInfo{CharacterID: session.selectedCharacterID, Session: session})
-		}
-	} else {
-		memberPeers = append(memberPeers, onlinePlayerInfo{CharacterID: session.selectedCharacterID, Session: session})
-	}
-
-	s.queueTownPeerDelivery(*leaderPeer, source+"_dungeon_return_leader_roster_rebind", nil, func() error {
-		leaderState := s.townCopresenceActorPartyState(leaderPeer.Session)
-		if leaderState.PartyID > 0 && leaderState.PartyID == partyStateAfter.PartyID {
-			if err := s.sendRuntimePartyTownReturnRebind(leaderPeer.Session, leaderState, source+"_dungeon_return_leader_roster_rebind"); err != nil {
-				s.logGameEvent(leaderPeer.Session, "game-dungeon-return-copresence-roster-failed",
-					"char_id", leaderPeer.CharacterID,
-					"party_id", partyStateAfter.PartyID,
-					"source", source,
-					"error", err)
-			}
-		}
-		dispatchMembers()
-		return nil
-	})
 }
