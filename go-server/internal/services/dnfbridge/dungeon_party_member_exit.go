@@ -168,6 +168,19 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 				s.forgetRuntimePartyRunKeysOnDisband(memberIDs, before.ID, source)
 			}
 		} else {
+			// 把"本次退图的角色"登记到每个幸存者的绑定账本：回城后 session.dungeon.runtime
+			// 会被摘除，届时已经无法再推出 D 是谁。
+			aliasIDs := make([]uint16, 0, len(beforeMembers)+1)
+			for _, m := range beforeMembers {
+				if m.UserID != 0 {
+					aliasIDs = append(aliasIDs, m.UserID)
+				}
+			}
+			for _, m := range runtimePartyMembers(next) {
+				if peerSession, ok := s.onlineGameSession(m.UserID); ok && peerSession != nil {
+					s.recordClientPartyAliasKeys(peerSession, aliasIDs, true)
+				}
+			}
 			errs = errors.Join(errs, s.sendMemberGiveupSurvivorRosterAfterDeparture(next, instance, identity.character))
 		}
 	} else {

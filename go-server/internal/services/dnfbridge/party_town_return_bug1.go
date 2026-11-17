@@ -171,8 +171,16 @@ func (s *Service) sendRuntimePartyTownReturnRebind(
 			return err
 		}
 	}
-	// 3. 切：发城镇名单（op153 + op9 kind0，owner = 频道号）。
+	// 3. 切：若曾被中途退图者抢绑，先复位 record(self,ch) 槽位，再发城镇名单，
+	//    使 CPartyRecord::SetMemberUser 命中 oldUser!=newUser 把绑定夺回。
+	if err := s.resetUnboundSelfChannelRecordIfHijacked(session, receiverState, source+"_pre_rebind_reset"); err != nil {
+		return err
+	}
 	if err := s.sendRuntimePartyRosterLocal(session, receiverState, source); err != nil {
+		return err
+	}
+	// 3.5 绑定已回到 record(self,ch)，静默退役退图者的 (D,0) 与 (D,ch)。
+	if err := s.retireDepartedPartyAliasRecordsAfterSelfRebind(session, receiverState, source+"_retire_departed_aliases"); err != nil {
 		return err
 	}
 	// 4. 副本作用域（owner=0）的旧记录：**只改成员表，不删记录**。
@@ -343,7 +351,8 @@ func (s *Service) retireDungeonPartyAliasRecords(receiver *gameSession, members 
 	memberSet[receiver.selectedCharacterID] = true
 	for _, member := range members {
 		if member.UserID != 0 {
-			}
+			memberSet[member.UserID] = true
+		}
 	}
 
 	nonPartyIDs := make([]uint16, 0, 4)

@@ -32,8 +32,17 @@ func (s *Service) sendRuntimePartyDeparture(receiver *gameSession, previous alig
 	// 0x201786B..0x2017D77 执行完整退队清场并释放 CPartyRecord。
 	// 顺序必须为：先 owner=0（副本作用域，不依赖当前场景号），后 owner=channel；
 	// 每个作用域内先退役所有队友（peers），最后退役自己（self）。
-	ordered := make([]uint16, 0, len(members)+len(previous.Members)+1)
-	seen := make(map[uint16]bool, len(members)+len(previous.Members)+1)
+	// 本机彻底离队时，把"曾经投影给他、但已不在队伍里"的历史记录（如中途退图者 D）
+	// 一并纳入 kind3 清场集合：他可能正绑在 record(D,ch) 上，不清就退不干净。
+	aliasKeys := consumeAllClientPartyAliasKeysOnDeparture(receiver)
+	ordered := make([]uint16, 0, len(aliasKeys)+len(members)+len(previous.Members)+1)
+	seen := make(map[uint16]bool, len(aliasKeys)+len(members)+len(previous.Members)+1)
+	for _, aliasID := range aliasKeys {
+		if aliasID != 0 && aliasID != identity.character && !seen[aliasID] {
+			seen[aliasID] = true
+			ordered = append(ordered, aliasID)
+		}
+	}
 	for _, member := range members {
 		if member.UserID != 0 && member.UserID != identity.character && !seen[member.UserID] {
 			seen[member.UserID] = true

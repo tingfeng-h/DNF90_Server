@@ -499,8 +499,9 @@ type gameSession struct {
 // by party.RuntimePartyManager; this cache exists solely to shape the current
 // EXE's existing party packets.
 type partySessionState struct {
-	mu    sync.Mutex
-	state alignedcmd.PartyState
+	mu            sync.Mutex
+	state         alignedcmd.PartyState
+	clientBinding partyClientBindingState
 }
 
 // questReplayState 持有任务接受/触发/完成三条回放的幂等去重状态。

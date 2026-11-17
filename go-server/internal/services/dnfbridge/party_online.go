@@ -553,7 +553,8 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
 	}
-	if err := s.broadcastRuntimePartyWalkoutNotice(previousState, parsed.Slot, 0); err != nil {
+	// 客户端 NOTI 10 按 CParty::GetSlotActor(权威固定槽位) 索引，不能用命令里的紧凑行号。
+	if err := s.broadcastRuntimePartyWalkoutNotice(previousState, target.Slot, 0); err != nil {
 		return err
 	}
 	if nextState.PartyID <= 0 {
@@ -1888,6 +1889,13 @@ func (s *Service) sendRuntimePartyMemberRemoved(session *gameSession, _ uint16, 
 	if !bound {
 		return nil
 	}
+	// 若本会话曾被中途退图者 record(D,ch) 抢绑，先复位 record(self,ch) 槽位，
+	// 否则接下来的 kind0 会因 oldUser==newUser 变成空操作，血条永远清不掉。
+	if state.PartyID > 0 {
+		if err := s.resetUnboundSelfChannelRecordIfHijacked(session, state, "runtime_party_member_removed_pre_rebind"); err != nil {
+			return err
+		}
+	}
 	current := s.currentPartyProjectionMembershipGuard(identity, &state)
 	frameSent, err := s.sendCurrentPartyFrameProjection(session, state, "runtime_party_member_removed")
 	if err != nil {
@@ -1895,6 +1903,12 @@ func (s *Service) sendRuntimePartyMemberRemoved(session *gameSession, _ uint16, 
 	}
 	if !frameSent {
 		return nil
+	}
+	// 绑定已回到 record(self,ch)，此时清掉退图者残留别名记录是静默的。
+	if state.PartyID > 0 {
+		if err := s.retireDepartedPartyAliasRecordsAfterSelfRebind(session, state, "runtime_party_member_removed_retire_aliases"); err != nil {
+			return err
+		}
 	}
 	realtime := party.BuildEmptyRealtimeInfo()
 	if state.PartyID > 0 {
@@ -2387,7 +2401,15 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 			"op2_owner_channel", ownerSelection.PeerActorOwner)
 	}
 	s.logPacketEvent("game-current-party-frame-op9-send", op9Fields...)
-	return sendCurrentFrame(body)
+	sent, sendErr := sendCurrentFrame(body)
+	if sent && partyActive {
+		projectedRecordID := characterID
+		if retainedRecordID != 0 {
+			projectedRecordID = retainedRecordID
+		}
+		s.recordClientPartyProjectionObserved(receiver, projectedRecordID, receiverOwnerChannel, localChannelID)
+	}
+	return sent, sendErr
 }
 
 func (s *Service) broadcastCurrentPartyActorProjection(actor *gameSession, state alignedcmd.PartyState, source string) error {
@@ -2658,6 +2680,7 @@ func (s *Service) receiverInActiveParty(receiver *gameSession) bool {
 	state := s.runtimePartyStateForSession(receiver)
 	return state.PartyID > 0
 }
+
 // isTownCopresencePartyFrameSource 判定这条队伍帧是否来自"城镇同屏演员投影"。
 //
 // 只有这一类帧里的"这个演员没有队伍"是**信息性**的：收包者与被投影的演员通常不在
@@ -2669,6 +2692,7 @@ func (s *Service) receiverInActiveParty(receiver *gameSession) bool {
 func isTownCopresencePartyFrameSource(source string) bool {
 	return strings.HasPrefix(source, "town_copresence_actor_")
 }
+
 // resolveCurrentPartyRowOrSlot 把客户端命令里的 slot 解析成"权威槽位上的那一行"。
 //
 // 客户端在队伍框里只渲染存在的成员（行号 0..n-1），而服务端的权威槽位在有人中途
@@ -2702,6 +2726,7 @@ func currentPartySnapshotSlots(snapshot party.RuntimePartySnapshot) []byte {
 	}
 	return slots
 }
+
 // rebuildRuntimePartyUDPRelay 在成员变更（踢人/退出）后**整个重建**这把中继。
 //
 // 现场（2026-11-17 14:29）：打过副本的队伍踢人时，relay.Sync 只关掉了 4 条 leg、
