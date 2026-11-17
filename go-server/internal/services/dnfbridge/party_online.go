@@ -2420,31 +2420,6 @@ func (s *Service) broadcastCurrentPartyActorProjection(actor *gameSession, state
 		// town_copresence_party_state.go 的 DNFBRIDGE_TOWN_COPRESENCE_SKIP_SAME_PARTY_FRAME）。
 		// An explicit removal must not resolve the retained singleton lobby:
 		// that lookup would republish the party projection we just cleared.
-		// 2026-11-17 (v24)：队伍记录只发给"还在这个队伍里的人"。
-		// 刚退队/被踢的人，会话里还挂着这支队伍（party_id 相同，但已不在名单里）；把这批
-		// "再声明一次队伍"的 op9 继续发给他，客户端会把刚才用 kind3 删掉的队伍重新建出来
-		// ---- 现场（/root/cap2 07:35:44）：退队者 6 秒内收到 9 条 obj=1/2/18 的 kind0，
-		// 于是出现"鬼队"、队长标记指向别人。旁观者与新进图的人（缓存里不是这支队伍）不受影响。
-		if state.PartyID > 0 {
-			if cached := runtimePartyStateSnapshot(peer.Session); cached.PartyID == state.PartyID {
-				stillMember := false
-				for _, m := range state.Members {
-					if m.UserID == peer.Session.selectedCharacterID {
-						stillMember = true
-						break
-					}
-				}
-				if !stillMember {
-					s.logPacketEvent("game-party-actor-projection-party-frame-skipped",
-						"conn_id", peer.Session.connID,
-						"source", source+"_to_area_peer",
-						"receiver_char_id", peer.Session.selectedCharacterID,
-						"actor_char_id", actor.selectedCharacterID,
-						"reason", "receiver_no_longer_in_this_party")
-					continue
-				}
-			}
-		}
 		if state.PartyID > 0 && s.shouldSkipTownCopresencePartyFrame(peer.Session, actor) {
 			s.logPacketEvent("game-party-actor-projection-party-frame-skipped",
 				"conn_id", peer.Session.connID,
@@ -2699,7 +2674,6 @@ func (s *Service) receiverInActiveParty(receiver *gameSession) bool {
 	state := s.runtimePartyStateForSession(receiver)
 	return state.PartyID > 0
 }
-
 // isTownCopresencePartyFrameSource 判定这条队伍帧是否来自"城镇同屏演员投影"。
 //
 // 只有这一类帧里的"这个演员没有队伍"是**信息性**的：收包者与被投影的演员通常不在
@@ -2711,7 +2685,6 @@ func (s *Service) receiverInActiveParty(receiver *gameSession) bool {
 func isTownCopresencePartyFrameSource(source string) bool {
 	return strings.HasPrefix(source, "town_copresence_actor_")
 }
-
 // resolveCurrentPartyRowOrSlot 把客户端命令里的 slot 解析成"权威槽位上的那一行"。
 //
 // 客户端在队伍框里只渲染存在的成员（行号 0..n-1），而服务端的权威槽位在有人中途
@@ -2745,7 +2718,6 @@ func currentPartySnapshotSlots(snapshot party.RuntimePartySnapshot) []byte {
 	}
 	return slots
 }
-
 // refreshSurvivorDungeonScopedMemberTables 把"存活者手里那条队伍记录"的成员表刷新成
 // 最新名单（kind2，不建不删）。
 //
@@ -2773,7 +2745,6 @@ func (s *Service) refreshSurvivorDungeonScopedMemberTables(nextState alignedcmd.
 		}
 	}
 }
-
 // rebuildRuntimePartyUDPRelay 在成员变更（踢人/退出）后**整个重建**这把中继。
 //
 // 现场（2026-11-17 14:29）：打过副本的队伍踢人时，relay.Sync 只关掉了 4 条 leg、
