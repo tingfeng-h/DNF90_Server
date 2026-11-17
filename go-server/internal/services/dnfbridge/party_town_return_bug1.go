@@ -285,25 +285,17 @@ func (s *Service) refreshDungeonScopedPartyMemberTables(receiver *gameSession, s
 	// (该角色, 频道号) 上，而这一版之前只刷了 owner=0 ⇒ 刷了等于没刷，血条里被踢的人
 	// 一直留着红电脑；后来那位退队者加入新队伍、服务端把那条记录重新声明成新队伍，
 	// 队长就跟着"自动解散"了。
-	owners := partyRecordOwnerChain(receiver, false)
 	sent := 0
 	for _, characterID := range keys {
 		objectKey := currentSceneActorObjectKey(characterID)
 		if objectKey == 0 {
 			continue
 		}
-		for _, owner := range owners {
-			// 成员与非成员一律发**当前名单**。
-			//
-			// 曾经试过对"非成员的旧记录"发空名单（kind2 count=0），结果把队长手里那条
-			// 记录直接清成 0 人——客户端判定"队伍空了"，队员的血条整排消失、只剩红电脑。
-			// 空名单是个破坏性动作，不能用；统一发当前名单，客户端看到的永远是真实成员。
-			body := buildCurrentSceneOp9RetainedPartyBody(objectKey, owner, localChannelID, projections, leaderSlot, route)
-			if _, err := s.sendRetiredPartyPacket(receiver, uint16(dnfenum.CmdPacketRecoverStamina), body, &state, nil, false); err != nil {
-				return err
-			}
-			sent++
+		body := buildCurrentSceneOp9RetainedPartyBody(objectKey, currentSceneObjectContext, localChannelID, projections, leaderSlot, route)
+		if _, err := s.sendRetiredPartyPacket(receiver, uint16(dnfenum.CmdPacketRecoverStamina), body, &state, nil, false); err != nil {
+			return err
 		}
+		sent++
 	}
 	s.logGameEvent(receiver, "game-party-town-return-member-tables-refreshed",
 		"source", source,
