@@ -46,20 +46,6 @@ func (s *Service) sendRuntimePartyDeparture(receiver *gameSession, previous alig
 			ordered = append(ordered, member.UserID)
 		}
 	}
-	// 中途退队后，客户端可能把"我的队伍"绑在**已经退队那个人**的记录上（他是最后被
-	// 投影的演员）。那条记录不在 previous.Members 里，原来的删除集合永远碰不到它，
-	// 于是点退出/被踢之后客户端仍显示在队伍里，只有重选角色才能脱离。
-	// 这里把"同区域里已不在队伍中的角色"也纳入删除集合：删到哪条就清哪条，
-	// 对离队者本人是预期行为（他就是要脱离队伍）。
-	if s.onlinePlayers != nil {
-		for _, peer := range s.onlinePlayers.PeersInSameArea(identity.character) {
-			if peer.CharacterID == 0 || peer.CharacterID == identity.character || seen[peer.CharacterID] {
-				continue
-			}
-			seen[peer.CharacterID] = true
-			ordered = append(ordered, peer.CharacterID)
-		}
-	}
 	if identity.character != 0 && !seen[identity.character] {
 		seen[identity.character] = true
 		ordered = append(ordered, identity.character)
