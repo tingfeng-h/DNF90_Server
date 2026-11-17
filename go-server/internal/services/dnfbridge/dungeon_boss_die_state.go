@@ -19,6 +19,7 @@ func (s *Service) handleDungeonBossDieCheck(session *gameSession, body []byte) e
 	if session == nil {
 		return nil
 	}
+	s.drainAllPartyDeaths(session)
 	if len(body) != dungeoncmd.BossDieCheckRequestSize {
 		s.logGameEvent(session, "game-dungeon-boss-die-check-blocked",
 			"body_len", len(body),

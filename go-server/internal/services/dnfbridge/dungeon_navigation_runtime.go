@@ -1706,6 +1706,7 @@ func sameSelectDungeonRequest(left, right dungeoncmd.SelectDungeonRequest) bool 
 }
 
 func (s *Service) handleDungeonMoveMap(session *gameSession, body []byte) error {
+	s.drainAllPartyDeaths(session)
 	if s.isCurrentTagTournamentChannel(session) {
 		return s.handleCurrentTagTournamentMove(session, body)
 	}

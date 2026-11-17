@@ -16,6 +16,11 @@ import (
 // reconstruction at the same point.
 func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSession, source string) error {
 	if s == nil || session == nil || session.selectedCharacterID == 0 || s.onlinePlayers == nil {
+		s.logGameEvent(session, "game-party-town-return-rebuild-gate",
+			"gate", "no_session",
+			"source", source,
+			"session_char_id", selectedCharacterID(session),
+			"online_players_present", s != nil && s.onlinePlayers != nil)
 		return nil
 	}
 	state := s.townCopresenceActorPartyState(session)
@@ -24,6 +29,12 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 	// transition too. Its peer loop is empty, but the existing roster rebuild
 	// must still run after the same canonical party and town-scene checks.
 	if state.PartyID <= 0 || len(members) == 0 {
+		s.logGameEvent(session, "game-party-town-return-rebuild-gate",
+			"gate", "party_empty",
+			"source", source,
+			"session_char_id", session.selectedCharacterID,
+			"party_id", state.PartyID,
+			"member_count", len(members))
 		return nil
 	}
 
@@ -31,11 +42,30 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 	for _, member := range members {
 		memberSession, online := s.onlineGameSession(member.UserID)
 		if !online || memberSession == nil || !currentPartyTownReturnSceneReady(memberSession) {
+			s.logGameEvent(session, "game-party-town-return-rebuild-gate",
+				"gate", "member_not_scene_ready",
+				"source", source,
+				"session_char_id", session.selectedCharacterID,
+				"party_id", state.PartyID,
+				"member_user", member.UserID,
+				"member_online", online,
+				"member_scene_ready", online && memberSession != nil && currentPartyTownReturnSceneReady(memberSession))
 			return nil
 		}
 		memberState := s.townCopresenceActorPartyState(memberSession)
 		if memberState.PartyID != state.PartyID || memberState.UserID != state.UserID ||
 			len(runtimePartyMembers(memberState)) != len(members) {
+			s.logGameEvent(session, "game-party-town-return-rebuild-gate",
+				"gate", "member_state_mismatch",
+				"source", source,
+				"session_char_id", session.selectedCharacterID,
+				"member_user", member.UserID,
+				"member_party_id", memberState.PartyID,
+				"member_leader_id", memberState.UserID,
+				"member_count_seen", len(runtimePartyMembers(memberState)),
+				"party_id", state.PartyID,
+				"leader_id", state.UserID,
+				"member_count", len(members))
 			return nil
 		}
 		sessions = append(sessions, memberSession)
@@ -49,6 +79,12 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			}
 			actor, found := s.onlinePlayers.PlayerForCharacter(member.UserID)
 			if !found || actor.Session == nil {
+				s.logGameEvent(receiver, "game-party-town-return-rebuild-gate",
+					"gate", "peer_town_actor_missing",
+					"source", source,
+					"receiver_char_id", receiver.selectedCharacterID,
+					"missing_peer", member.UserID,
+					"party_id", state.PartyID)
 				return fmt.Errorf("party return peer %d has no town actor", member.UserID)
 			}
 			// 频道隔离（彻底隔离口径）：跨频道队友一律不投影（op23 没有频道字段，
@@ -99,6 +135,13 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 		if err := s.sendRuntimePartyTownReturnRebind(receiver, state, source+"_party_roster"); err != nil {
 			return err
 		}
+		s.logGameEvent(receiver, "game-party-town-return-receiver-rebound",
+			"source", source,
+			"receiver_char_id", receiver.selectedCharacterID,
+			"party_id", state.PartyID,
+			"leader_char_id", state.UserID,
+			"member_count", len(members),
+			"receiver_selected_char_id", receiver.selectedCharacterID)
 	}
 	s.logGameEvent(session, "game-party-town-return-copresence-rebuilt",
 		"source", source,

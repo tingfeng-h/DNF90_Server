@@ -101,7 +101,7 @@ func currentDungeonDeathBurstSpan(packets []dnfproto.LatestGameStreamPacket) int
 func (s *Service) currentDungeonDeathBurstEnabled(session *gameSession) bool {
 	runtime := session.dungeon.runtime
 	return s.options.currentClientVersion == "official-24.9" && runtime != nil && runtime.Room != nil &&
-		runtime.Tournament == nil && runtime.raidEntry == nil && runtime.guildPractice == nil && !currentFriendlyGuildPractice(runtime)
+		runtime.Tournament == nil && runtime.guildPractice == nil && !currentFriendlyGuildPractice(runtime)
 }
 
 func (s *Service) activeCurrentDungeonDeathBurst(session *gameSession, runtime *runtimeDungeonState) *currentDungeonDeathBurst {

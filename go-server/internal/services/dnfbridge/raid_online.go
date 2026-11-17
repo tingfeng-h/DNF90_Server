@@ -1092,7 +1092,7 @@ func (s *Service) applyRuntimeRaidParties(state runtimeRaidState) error {
 	// seats are not authority to recreate ordinary parties formed during
 	// phase one. Keep their IDs, slots and live UDP transports intact.
 	if b := state.Battle; s.options.currentClientVersion == "official-24.9" &&
-		b != nil && b.Mode == 1 && !b.Single && b.Phase > 0 {
+		b != nil && (b.Mode == 1 || b.Mode == 2) && !b.Single && b.Phase > 0 {
 		return nil
 	}
 	// FiendWar's 1..8 placements are personal raid seats, not ordinary party

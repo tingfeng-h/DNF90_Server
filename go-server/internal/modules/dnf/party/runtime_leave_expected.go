@@ -38,6 +38,10 @@ func (m *RuntimePartyManager) LeaveDungeonExpected(userID uint16, generation uin
 		disbanded := previous
 		return RuntimePartyResult{OK: true, Previous: &previous, TargetUser: userID, Disbanded: true, Retired: &disbanded}
 	}
+	// 不重排槽位：客户端 .rprior 会跳过 0xFFFF 空槽，但要求每个非空槽位
+	// memberUsers[esi] 的槽位下标与记录里的 esi 完全一致；在副本内把 2P/3P
+	// 前移会触发客户端整队重绑，表现为血槽重排、互相看不见。
+	// 因此 1P 中途退图后保留稀疏槽位（[0xFFFF, 2P, 3P]），只移交 leader。
 	if wasLeader {
 		p.leader = p.membersBySlot()[0].UserID
 		p.settings.UserID, p.settings.IsLeader = p.leader, true

@@ -712,6 +712,10 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// 锁外执行（要读实例注册表 / 可能要发帧，不能持有 session.dungeon.mu）。
 		// 本函数（`:493` 的闸门）只在 run_status=completed 时才会走到 ⇒ 这里就是
 		// **通关回城**这条路径，不走 dungeon_party_leader_exit.go 的解散。
+		// 先登记本机城镇同屏，再扇出队友回城：否则队友 EnterArea 时
+		// allSameChannelPartyMembersOutsideDungeon 会因为"队长已不在副本但
+		// 尚未登记城镇"而误判就绪，提前触发一次不完整的重绑。
+		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
 		if !s.retireCurrentFiendWarEncounterParty(session, runtime) {
 			// Completion does not turn ESC give-up (42) into the result-page
 			// team return (72). Both explicit personal exits retain survivors.
@@ -730,7 +734,6 @@ func (s *Service) sendCurrentCompletedDungeonReturnToTown(
 		// （party_town_return.go:92），"最后一个成员到位后重建同屏"永远是 no-op，
 		// 两个人回城后互相看不见。默认档登记城镇同屏 + 作废本会话的副本运行键；
 		// 回退档一个字段都不改。见 dungeon_party_completion_return_town_presence.go。
-		published := s.publishCompletedDungeonReturnTownPresence(session, transition, "completed_town_route")
 		// 多人队伍的同屏与队伍绑定统一由 rebindTownCopresenceAfterDungeonReturn 在全员到位时
 		// 一次性完成，这里不再二次重建（二次重建会在 [town_local_actor+0x4C8] 已绑定时再发
 		// kind3，触发客户端 0x201786B 解散分支，表现为"先解散再重组"）。

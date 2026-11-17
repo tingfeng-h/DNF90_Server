@@ -224,10 +224,8 @@ func (s *Service) sendMemberGiveupSurvivorRosterAfterDeparture(state alignedcmd.
 				continue
 			}
 		}
-		owners := []byte{currentSceneObjectContext}
-		if owner := currentClientSelectedChannel(receiver); owner != currentSceneObjectContext {
-			owners = append([]byte{owner}, owners...)
-		}
+		// owner 记录链统一由 partyRecordOwnerChain 给出：城镇作用域优先（先建城镇记录）。
+		owners := partyRecordOwnerChain(receiver, true)
 		complete := true
 		for _, owner := range owners {
 			sent, err := s.sendMemberGiveupSurvivorRosterInContext(receiver, state, departingID, owner, current)
@@ -257,10 +255,8 @@ func (s *Service) resetDungeonSingletonPartyDisplay(receiver *gameSession, state
 	if s.options.currentClientVersion != "official-24.9" || len(runtimePartyMembers(state)) != 1 {
 		return false, nil
 	}
-	owners := []byte{currentSceneObjectContext}
-	if owner := currentClientSelectedChannel(receiver); owner != currentSceneObjectContext {
-		owners = append([]byte{owner}, owners...)
-	}
+	// owner 记录链统一由 partyRecordOwnerChain 给出：城镇作用域优先（先建城镇记录）。
+	owners := partyRecordOwnerChain(receiver, true)
 	instance.mu.Lock()
 	keys := instance.retiredPartyRecordKeys
 	instance.mu.Unlock()
@@ -291,20 +287,15 @@ func (s *Service) resetDungeonSingletonPartyDisplay(receiver *gameSession, state
 func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession, state alignedcmd.PartyState, departingID uint16, owner byte, current func() bool) (bool, error) {
 	selection := currentPartyFrameOwnerSelection{Mode: currentPartyFrameOwnerExplicit, Owner: owner}
 	if departingID != 0 {
-		// Every record can still own a survivor's party binding. Give the
-		// departed actor's record the same retained roster, not an empty roster:
-		// native kind2 would otherwise destroy all its former peers' models and
-		// tear down the local network before the following kind0 can rebind it.
-		sent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, "member_giveup_network_roster", nil, selection)
+		// 先给退图者的记录发 kind2（保留同批留存者名单），避免 kind3 清空
+		// 存活者的 [dungeon_actor+0x4C8]；顺序必须在幸存者主记录之前，
+		// 让客户端最后处理的 NOTI9 是把 +0x4C8 绑回主记录的那条。
+		sent, err := s.sendCurrentPartyRecordProjectionInContext(receiver, receiver, state, "member_giveup_retained_record", nil, selection, departingID)
 		if err != nil || !sent {
 			return false, err
 		}
 		if !current() {
 			return false, nil
-		}
-		sent, err = s.sendCurrentPartyRecordProjectionInContext(receiver, receiver, state, "member_giveup_retained_record", nil, selection, departingID)
-		if err != nil || !sent {
-			return false, err
 		}
 	}
 	// 先发所有幸存队友（peers），最后发收包者自己（self），确保在 owner=channel 下

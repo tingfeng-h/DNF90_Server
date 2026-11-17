@@ -866,6 +866,13 @@ func (s *Service) rebindTownCopresenceAfterDungeonReturn(
 	}
 	session.townMu.Unlock()
 	partyStateAfter := s.townCopresenceActorPartyState(session)
+	s.logGameEvent(session, "game-party-town-return-rebind-state-resolved",
+		"char_id", characterID,
+		"session_selected_char_id", session.selectedCharacterID,
+		"party_id", partyStateAfter.PartyID,
+		"leader_char_id", partyStateAfter.UserID,
+		"member_count", len(runtimePartyMembers(partyStateAfter)),
+		"source", source)
 	partyPeers := make([]onlinePlayerInfo, 0, len(newOthers)+len(runtimePartyMembers(partyStateAfter)))
 	partyPeers = append(partyPeers, newOthers...)
 	seenPartyPeer := make(map[uint16]bool, len(partyPeers))

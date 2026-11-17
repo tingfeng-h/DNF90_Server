@@ -397,6 +397,7 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 			"type", typ,
 			"source_char_id", sourceID,
 			"reason", result.Reason)
+		s.logPartyOperation(session, "leave", "client_leave_party_op13_stale_projection", previous, alignedcmd.PartyState{})
 		if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 			return err
 		}
@@ -435,6 +436,14 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 		s.syncRuntimePartyUDPRelay(nextState)
 	} else {
 		s.closeRuntimePartyUDPRelay(state.PartyID)
+	}
+	s.logPartyOperation(session, "leave", "client_leave_party_op13", previous, nextState)
+	s.refreshSurvivorDungeonScopedMemberTables(nextState, "party_leave_survivor_member_tables")
+	if nextState.PartyID > 0 {
+		if err := s.sendManagedRuntimePartySnapshots(nextState); err != nil {
+			s.logGameEvent(session, "game-party-leave-snapshot-failed",
+				"char_id", sourceID, "party_id", nextState.PartyID, "error", err)
+		}
 	}
 	if err := s.broadcastRuntimePartyMemberRemoved(state, nextState, sourceID, session); err != nil {
 		return err
@@ -508,19 +517,18 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 			"slot", parsed.Slot)
 		return s.sendPartyCommandFailure(session, typ, walkoutPartyFailureAuthority)
 	}
-	var target party.RuntimePartyMember
-	for _, member := range snapshot.Members {
-		if member.Slot == parsed.Slot {
-			target = member
-			break
-		}
-	}
-	if target.UserID == 0 || target.UserID == identity.character {
+	// 客户端 op14 里带的"slot"实际是**队伍框里的行号**；而权威槽位在有人中途离开后
+	// 会留空洞（例如 0,1,3 —— 刻意不压缩，压缩会触发客户端血槽重排）。两者在槽位连续时
+	// 恰好相等，一旦有空洞就错位，表现为"点了踢人没反应"（现场 game-party-walkout-invalid-slot）。
+	// 先按槽位精确匹配，匹配不到再按行号回退。
+	target, matched := resolveCurrentPartyRowOrSlot(snapshot, parsed.Slot)
+	if !matched || target.UserID == identity.character {
 		s.logGameEvent(session, "game-party-walkout-invalid-slot",
 			"type", typ,
 			"source_char_id", identity.character,
 			"slot", parsed.Slot,
-			"member_count", len(snapshot.Members))
+			"member_count", len(snapshot.Members),
+			"authoritative_slots", currentPartySnapshotSlots(snapshot))
 		return s.sendPartyCommandFailure(session, typ, walkoutPartyFailureInvalid)
 	}
 	previousState := snapshot.StateFor(identity.character)
@@ -546,6 +554,18 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 		}
 	}
 	nextState := s.publishRuntimePartyMembershipSnapshot(result.Party)
+	s.logPartyOperation(session, "kick", "leader_kick_walkout", previousState, nextState,
+		"target_char_id", target.UserID,
+		"target_slot", parsed.Slot)
+	s.refreshSurvivorDungeonScopedMemberTables(nextState, "party_kick_survivor_member_tables")
+	// 成员变更后重发一次完整快照（op11 端点 + op153 + op9）：踢人会让中继的 pair 重建，
+	// 客户端手里的旧端点随即失效，只更新成员表的话会停在"连接中"。
+	if nextState.PartyID > 0 {
+		if err := s.sendManagedRuntimePartySnapshots(nextState); err != nil {
+			s.logGameEvent(session, "game-party-kick-snapshot-failed",
+				"char_id", identity.character, "party_id", nextState.PartyID, "error", err)
+		}
+	}
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
 	}
@@ -1177,44 +1197,51 @@ func (s *Service) handleOnlineResponsePeer(session *gameSession, typ uint16, bod
 	if result.AlreadyMember {
 		return s.sendRuntimePartyRosterRefresh(joiner, result.Party.StateFor(selectedCharacterID(joiner)), "party_invite_existing_member_confirmation")
 	}
-	s.synchronizeOrdinaryPartyRaidGroups(state, "party_invite_accept", result.Party)
-	if err := s.sendManagedRuntimePartySnapshots(state); err != nil {
-		return err
-	}
-	// 加入成功后再无条件给**被邀请方**补一次权威名单（op153+op9，不带 op11 握手）。
-	//
-	// 现场（2026-09-24 21:47，角色 3 邀请角色 2）：服务端判定完全正确
-	// （game-dungeon-select-party-context char_id=2 … is_leader=false），但被邀请方的
-	// 客户端界面上自己仍是队长。上面的 stale 清理只在"服务端视角里它已有非零 party id"
-	// 时才触发，而这次没有触发（整段日志没有 game-party-invitee-stale-projection-cleared）
-	// ——它那份"我是队长"的显示来自本地 op12 投影，服务端无从感知，所以清理条件不能作为
-	// 唯一保障：加入之后必须无条件再画一次权威名单。
-	//
-	// 用 roster 路径（op153+op9）而不是整份 snapshot：op11 是 UDP 对端握手，
-	// 刚建立对端后再重放会让当前客户端拆掉健康连接进入 connecting（仓库既有注释）。
-	if manager := s.runtimePartyManagerForService(); manager != nil {
-		if snapshot, found := manager.SnapshotByID(uint16(state.PartyID)); found {
-			joinerState := snapshot.StateFor(joiner.selectedCharacterID)
-			if err := s.sendRuntimePartyRosterLocal(joiner, joinerState, "party_invite_join_authoritative_roster"); err != nil {
-				return err
+	// 收尾统一走 finishManagedPartyJoin（三个入队入口同一段顺序）。
+	// 邀请接受比另外两个入口多一步：快照之后再无条件给被邀请方补一次权威名单。
+	return s.finishManagedPartyJoin(partyJoinFinish{
+		State:  state,
+		Party:  result.Party,
+		Source: "party_invite_accept",
+		Joiner: joiner,
+		Anchor: anchor,
+		Prior:  result.PriorLeave,
+		AfterSnapshot: func() error {
+			// 加入成功后再无条件给**被邀请方**补一次权威名单（op153+op9，不带 op11 握手）。
+			//
+			// 现场（2026-09-24 21:47，角色 3 邀请角色 2）：服务端判定完全正确
+			// （game-dungeon-select-party-context char_id=2 … is_leader=false），但被邀请方的
+			// 客户端界面上自己仍是队长。上面的 stale 清理只在"服务端视角里它已有非零 party id"
+			// 时才触发，而这次没有触发（整段日志没有 game-party-invitee-stale-projection-cleared）
+			// ——它那份"我是队长"的显示来自本地 op12 投影，服务端无从感知，所以清理条件不能作为
+			// 唯一保障：加入之后必须无条件再画一次权威名单。
+			//
+			// 用 roster 路径（op153+op9）而不是整份 snapshot：op11 是 UDP 对端握手，
+			// 刚建立对端后再重放会让当前客户端拆掉健康连接进入 connecting（仓库既有注释）。
+			if manager := s.runtimePartyManagerForService(); manager != nil {
+				if snapshot, found := manager.SnapshotByID(uint16(state.PartyID)); found {
+					joinerState := snapshot.StateFor(joiner.selectedCharacterID)
+					if err := s.sendRuntimePartyRosterLocal(joiner, joinerState, "party_invite_join_authoritative_roster"); err != nil {
+						return err
+					}
+					var slotZeroCharID uint16
+					if len(joinerState.Members) > 0 {
+						// 权威名单是 leader-first：0 号位就是队长（客户端以第一行判队长）。
+						slotZeroCharID = joinerState.Members[0].UserID
+					}
+					s.logGameEvent(joiner, "game-party-join-authoritative-snapshot-sent",
+						"type", typ,
+						"char_id", selectedCharacterID(joiner),
+						"target_id", selectedCharacterID(anchor),
+						"party_id", state.PartyID,
+						"leader_char_id", state.UserID,
+						"member_count", len(state.Members),
+						"slot_zero_char_id", slotZeroCharID)
+				}
 			}
-			var slotZeroCharID uint16
-			if len(joinerState.Members) > 0 {
-				// 权威名单是 leader-first：0 号位就是队长（客户端以第一行判队长）。
-				slotZeroCharID = joinerState.Members[0].UserID
-			}
-			s.logGameEvent(joiner, "game-party-join-authoritative-snapshot-sent",
-				"type", typ,
-				"char_id", selectedCharacterID(joiner),
-				"target_id", selectedCharacterID(anchor),
-				"party_id", state.PartyID,
-				"leader_char_id", state.UserID,
-				"member_count", len(state.Members),
-				"slot_zero_char_id", slotZeroCharID)
-		}
-	}
-	s.refreshTownPartyActorsAfterJoin(state, "party_invite_accept")
-	return nil
+			return nil
+		},
+	})
 }
 
 func (s *Service) handleOnlineEntryIntoParty(session *gameSession, typ uint16, body []byte) error {
@@ -1279,35 +1306,42 @@ func (s *Service) handleOnlineEntryIntoParty(session *gameSession, typ uint16, b
 			"party_id", state.PartyID, "member_count", len(result.Party.Members))
 		return s.sendRuntimePartyRosterRefresh(session, result.Party.StateFor(selectedCharacterID(session)), "party_entry_existing_member_confirmation")
 	}
-	s.synchronizeOrdinaryPartyRaidGroups(state, "party_entry_into_party", result.Party)
-	if err := s.sendManagedRuntimePartySnapshots(state); err != nil {
-		return err
-	}
-	// 归属判据（只加日志字段、不动一个字节的线格式）：op705 是"直接入队"，
-	// 本实现把**发包方**当 anchor/队长（见本函数开头的 op706 注释）、把**包里的 target**
-	// 当 joiner。这条归属口径在仓库里没有实测证据，而操作者文档报的正是
-	// "被邀请者会成为队长 / 队长无法移交"——如果真实客户端把 op705 当作
-	// "我要加入 target 的队伍"（与 op90 队伍目录快速加入同一个方向：
-	// `handleRuntimePartyDirectoryJoin` 传的是 `(joiner=发包方, anchor=target)`），
-	// 那么这里的 socket/包 target 方向就是反的。把锚点、入队者、最终队长与 0 号位
-	// 全打出来，操作者点一次"申请入队"就能单行判读，不必再猜。
-	anchorID, joinerID := session.selectedCharacterID, targetID
-	slotZeroCharID := uint16(0)
-	if members := runtimePartyMembers(state); len(members) > 0 {
-		slotZeroCharID = members[0].UserID
-	}
-	s.logGameEvent(session, "game-party-entry-linked-online-sessions",
-		"type", typ,
-		"source_char_id", session.selectedCharacterID,
-		"target_id", targetID,
-		"anchor_char_id", anchorID,
-		"joiner_char_id", joinerID,
-		"leader_char_id", state.UserID,
-		"slot_zero_char_id", slotZeroCharID,
-		"member_count", len(state.Members),
-		"wire_contract", "op705_entry_into_party_packet_sender_is_the_anchor_unproven_direction")
-	s.refreshTownPartyActorsAfterJoin(state, "party_entry_into_party")
-	return nil
+	// 收尾统一走 finishManagedPartyJoin；op705 的 ACK 已经在上面发过，所以这里没有
+	// AfterSynchronize 钩子。归属判据的日志保持在"快照之后、同屏刷新之前"的原位置。
+	return s.finishManagedPartyJoin(partyJoinFinish{
+		State:  state,
+		Party:  result.Party,
+		Source: "party_entry_into_party",
+		Joiner: targetSession,
+		Anchor: session,
+		Prior:  result.PriorLeave,
+		AfterSnapshot: func() error {
+			// 归属判据（只加日志字段、不动一个字节的线格式）：op705 是"直接入队"，
+			// 本实现把**发包方**当 anchor/队长（见本函数开头的 op706 注释）、把**包里的 target**
+			// 当 joiner。这条归属口径在仓库里没有实测证据，而操作者文档报的正是
+			// "被邀请者会成为队长 / 队长无法移交"——如果真实客户端把 op705 当作
+			// "我要加入 target 的队伍"（与 op90 队伍目录快速加入同一个方向：
+			// `handleRuntimePartyDirectoryJoin` 传的是 `(joiner=发包方, anchor=target)`），
+			// 那么这里的 socket/包 target 方向就是反的。把锚点、入队者、最终队长与 0 号位
+			// 全打出来，操作者点一次"申请入队"就能单行判读，不必再猜。
+			anchorID, joinerID := session.selectedCharacterID, targetID
+			slotZeroCharID := uint16(0)
+			if members := runtimePartyMembers(state); len(members) > 0 {
+				slotZeroCharID = members[0].UserID
+			}
+			s.logGameEvent(session, "game-party-entry-linked-online-sessions",
+				"type", typ,
+				"source_char_id", session.selectedCharacterID,
+				"target_id", targetID,
+				"anchor_char_id", anchorID,
+				"joiner_char_id", joinerID,
+				"leader_char_id", state.UserID,
+				"slot_zero_char_id", slotZeroCharID,
+				"member_count", len(state.Members),
+				"wire_contract", "op705_entry_into_party_packet_sender_is_the_anchor_unproven_direction")
+			return nil
+		},
+	})
 }
 
 func (s *Service) handleOnlineEntryIntoPartyFinish(session *gameSession, typ uint16) error {
@@ -1734,14 +1768,24 @@ func (s *Service) syncRuntimePartyUDPRelay(state alignedcmd.PartyState) bool {
 	for _, member := range members {
 		identity, ok := s.onlineGameSessionCharacterSnapshot(member.UserID)
 		if !ok || identity.session == nil || identity.generation == 0 || identity.session.conn == nil {
+			s.logPacketEvent("game-party-relay-sync-skipped",
+				"party_id", state.PartyID,
+				"member_user", member.UserID,
+				"snapshot_found", ok,
+				"session_present", ok && identity.session != nil,
+				"generation", identity.generation,
+				"conn_present", ok && identity.session != nil && identity.session.conn != nil,
+				"reason", "member_session_unavailable_so_legs_are_not_rebuilt")
 			return false
 		}
 		tcpAddress, ok := identity.session.conn.RemoteAddr().(*net.TCPAddr)
 		if !ok || tcpAddress.IP == nil {
+			s.logPacketEvent("game-party-relay-sync-skipped", "party_id", state.PartyID, "member_user", member.UserID, "reason", "tcp_address_unavailable")
 			return false
 		}
 		ipv4 := tcpAddress.IP.To4()
 		if len(ipv4) != net.IPv4len {
+			s.logPacketEvent("game-party-relay-sync-skipped", "party_id", state.PartyID, "member_user", member.UserID, "reason", "tcp_address_not_ipv4")
 			return false
 		}
 		binding := currentPartyUDPRelayBinding{characterID: identity.character, generation: identity.generation}
@@ -1842,10 +1886,8 @@ func (s *Service) broadcastRuntimePartyMemberRemoved(previousState, nextState al
 			return err
 		}
 		if removedKey != 0 {
-			owners := []byte{currentSceneObjectContext}
-			if channel := currentClientSelectedChannel(session); channel != currentSceneObjectContext {
-				owners = append(owners, channel)
-			}
+			// owner 记录链统一由 partyRecordOwnerChain 给出：副本作用域优先。
+			owners := partyRecordOwnerChain(session, false)
 			for _, owner := range owners {
 				body := buildCurrentSceneOp9ActorRemovalBodyInContext(removedKey, owner, route)
 				if err := s.sendGameUpperRawClass(session, uint16(dnfenum.CmdPacketRecoverStamina), body, 0); err != nil {
@@ -2241,6 +2283,31 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 		return sent, err
 	}
 	if !partyActive {
+		// 收包者自己还在队伍里、而被投影的是"别的演员没有队伍"时，**不发**这条 kind3。
+		//
+		// 现场（2026-11-17 01:44，4 人→中退 1 人→通关回城，解码 op9 得到）：
+		// 每个客户端收到的第一条队伍帧就是
+		//     obj=0x0012(退队者) owner=10 kind=3
+		// 而客户端当前使用的那条记录正是它（入队/进副本时最后一次投影的就是退队者），
+		// 于是：删它 ⇒ "队伍已解散" ⇒ 后面再发自己的记录 ⇒ "已与玩家组队" ⇒ 重组。
+		// 没人退队时这条帧根本不存在（没有"无队伍的演员"要清），所以从来不会重组。
+		//
+		// 这条帧对收包者没有任何信息价值（删的是别人的记录），却会误伤它自己的绑定；
+		// 而"退队者那条记录里残留的旧人数"由 refreshDungeonScopedPartyMemberTables 的
+		// kind2 原地修正，不需要删除。用同一个开关控制这两半策略。
+		if bug1TownReturnKind2RefreshEnabled() &&
+			isTownCopresencePartyFrameSource(source) &&
+			receiverIdentity.character != characterID &&
+			s.receiverInActiveParty(receiver) {
+			s.logPacketEvent("game-party-op9-remove-other-actor-skipped",
+				"source", source,
+				"receiver_char_id", receiverIdentity.character,
+				"actor_char_id", characterID,
+				"object_key", objectKey,
+				"owner_channel", receiverOwnerChannel,
+				"reason", "never_destroy_another_actors_party_record_on_a_client_that_is_itself_in_a_party")
+			return false, nil
+		}
 		body := buildCurrentSceneOp9ActorRemovalBodyInContext(
 			objectKey,
 			receiverOwnerChannel,
@@ -2268,11 +2335,17 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 	// 2026-09-27：这个判据必须用**未截断**的 int 频道号（客户端场景频道可能是 508
 	// 这种 >255 的值，任何 u8 都不等于它 ⇒ 那些行必须一律带身份块）。
 	localChannelID := currentClientSelectedChannelID(receiver)
+	// 队伍名取自定义队名 / 队长名，而不是"被投影的 actor 自己的名字"：
+	// 否则每个队员的「我的队伍」和「队伍信息」都会显示自己的角色名。
+	displayName := characterName
+	if partyActive {
+		displayName = resolveCurrentPartyDisplayName(state, projections, leaderSlot, characterName)
+	}
 	body := buildCurrentSceneOp9ActorPartyDisplayBodyForProfileWithPartyMax(
 		objectKey,
 		character,
 		hasCharacter,
-		characterName,
+		displayName,
 		receiverOwnerChannel,
 		localChannelID,
 		projections,
@@ -2347,6 +2420,31 @@ func (s *Service) broadcastCurrentPartyActorProjection(actor *gameSession, state
 		// town_copresence_party_state.go 的 DNFBRIDGE_TOWN_COPRESENCE_SKIP_SAME_PARTY_FRAME）。
 		// An explicit removal must not resolve the retained singleton lobby:
 		// that lookup would republish the party projection we just cleared.
+		// 2026-11-17 (v24)：队伍记录只发给"还在这个队伍里的人"。
+		// 刚退队/被踢的人，会话里还挂着这支队伍（party_id 相同，但已不在名单里）；把这批
+		// "再声明一次队伍"的 op9 继续发给他，客户端会把刚才用 kind3 删掉的队伍重新建出来
+		// ---- 现场（/root/cap2 07:35:44）：退队者 6 秒内收到 9 条 obj=1/2/18 的 kind0，
+		// 于是出现"鬼队"、队长标记指向别人。旁观者与新进图的人（缓存里不是这支队伍）不受影响。
+		if state.PartyID > 0 {
+			if cached := runtimePartyStateSnapshot(peer.Session); cached.PartyID == state.PartyID {
+				stillMember := false
+				for _, m := range state.Members {
+					if m.UserID == peer.Session.selectedCharacterID {
+						stillMember = true
+						break
+					}
+				}
+				if !stillMember {
+					s.logPacketEvent("game-party-actor-projection-party-frame-skipped",
+						"conn_id", peer.Session.connID,
+						"source", source+"_to_area_peer",
+						"receiver_char_id", peer.Session.selectedCharacterID,
+						"actor_char_id", actor.selectedCharacterID,
+						"reason", "receiver_no_longer_in_this_party")
+					continue
+				}
+			}
+		}
 		if state.PartyID > 0 && s.shouldSkipTownCopresencePartyFrame(peer.Session, actor) {
 			s.logPacketEvent("game-party-actor-projection-party-frame-skipped",
 				"conn_id", peer.Session.connID,
@@ -2437,6 +2535,30 @@ func effectivePartyDisplayMaxMembers(state alignedcmd.PartyState) byte {
 		maxMembers = 4
 	}
 	return maxMembers
+}
+
+// resolveCurrentPartyDisplayName 决定 op9 记录头里的队伍名：
+// 自定义队名（op12 NameBytes）> 队长名 > 回退名。
+func resolveCurrentPartyDisplayName(
+	state alignedcmd.PartyState,
+	projections []currentSceneOp9PartyMemberProjection,
+	leaderSlot byte,
+	fallbackName string,
+) string {
+	if custom := strings.TrimSpace(strings.TrimRight(string(state.NameBytes), "\x00")); custom != "" {
+		return custom
+	}
+	if int(leaderSlot) >= 0 && int(leaderSlot) < len(projections) {
+		if name := strings.TrimSpace(projections[leaderSlot].Name); name != "" {
+			return name
+		}
+	}
+	for _, proj := range projections {
+		if proj.State.UserID == state.UserID && strings.TrimSpace(proj.Name) != "" {
+			return proj.Name
+		}
+	}
+	return fallbackName
 }
 
 func runtimePartyMembers(state alignedcmd.PartyState) []alignedcmd.PartyMemberState {
@@ -2565,4 +2687,105 @@ func selectedCharacterID(session *gameSession) uint16 {
 		return 0
 	}
 	return session.selectedCharacterID
+}
+
+// receiverInActiveParty 判定收包者自己是否处在一支活跃队伍里。
+// 用在"是否允许删除别人队伍记录"的判据上：自己对局中（队伍活跃）时，客户端手里的
+// 那条记录可能就是自己正在用的，删别人的记录会连带把自己踢出队伍。
+func (s *Service) receiverInActiveParty(receiver *gameSession) bool {
+	if s == nil || receiver == nil {
+		return false
+	}
+	state := s.runtimePartyStateForSession(receiver)
+	return state.PartyID > 0
+}
+
+// isTownCopresencePartyFrameSource 判定这条队伍帧是否来自"城镇同屏演员投影"。
+//
+// 只有这一类帧里的"这个演员没有队伍"是**信息性**的：收包者与被投影的演员通常不在
+// 同一支队伍里，删掉对方的队伍记录对收包者没有信息价值，却可能连带着删掉它自己正在
+// 使用的那条记录（进副本/入队时最后一次被投影的演员记录）⇒ 客户端判定"队伍没了"。
+//
+// 退出队伍 / 队长踢人所走的 source（runtime_party_member_removed* / party_departure*）
+// 是**真正的清除通知**，必须照常发，否则幸存者会一直显示离队者还在队伍里（红电脑）。
+func isTownCopresencePartyFrameSource(source string) bool {
+	return strings.HasPrefix(source, "town_copresence_actor_")
+}
+
+// resolveCurrentPartyRowOrSlot 把客户端命令里的 slot 解析成"权威槽位上的那一行"。
+//
+// 客户端在队伍框里只渲染存在的成员（行号 0..n-1），而服务端的权威槽位在有人中途
+// 离开后会保留空洞（例如 0,1,3 —— 刻意不压缩，压缩会触发客户端血槽重排）。
+// 槽位连续时"行号 == 槽位号"，看不出差别；一旦有空洞，客户端发来的行号在服务端
+// 查不到对应槽位，表现为"点了没反应"（现场：game-party-walkout-invalid-slot）。
+//
+// 因此：先按槽位精确匹配；匹配不到再按"行号"（快照成员按槽位升序）回退。
+func resolveCurrentPartyRowOrSlot(snapshot party.RuntimePartySnapshot, rowOrSlot byte) (party.RuntimePartyMember, bool) {
+	for _, member := range snapshot.Members {
+		if member.UserID != 0 && member.Slot == rowOrSlot {
+			return member, true
+		}
+	}
+	if int(rowOrSlot) < len(snapshot.Members) {
+		member := snapshot.Members[rowOrSlot]
+		if member.UserID != 0 {
+			return member, true
+		}
+	}
+	return party.RuntimePartyMember{}, false
+}
+
+// currentPartySnapshotSlots 只用于日志：把权威槽位布局打出来，便于判读"行号 vs 槽位"错位。
+func currentPartySnapshotSlots(snapshot party.RuntimePartySnapshot) []byte {
+	slots := make([]byte, 0, len(snapshot.Members))
+	for _, member := range snapshot.Members {
+		if member.UserID != 0 {
+			slots = append(slots, member.Slot)
+		}
+	}
+	return slots
+}
+
+// refreshSurvivorDungeonScopedMemberTables 把"存活者手里那条队伍记录"的成员表刷新成
+// 最新名单（kind2，不建不删）。
+//
+// 起因：中途有人退队后，客户端可能把"我的队伍"绑在退队者的记录上；只更新各人自己的
+// 记录不会改变他们的显示。对每条候选记录都发一次 kind2，才能保证无论客户端用哪条，
+// 看到的人数与成员都是最新的。
+func (s *Service) refreshSurvivorDungeonScopedMemberTables(nextState alignedcmd.PartyState, source string) {
+	if s == nil || nextState.PartyID <= 0 {
+		return
+	}
+	for _, member := range runtimePartyMembers(nextState) {
+		if member.UserID == 0 {
+			continue
+		}
+		session, ok := s.onlineGameSession(member.UserID)
+		if !ok || session == nil {
+			continue
+		}
+		if err := s.refreshDungeonScopedPartyMemberTables(session, stateForRuntimePartyReceiver(nextState, member.UserID), source); err != nil {
+			s.logGameEvent(session, "game-party-survivor-member-tables-failed",
+				"source", source,
+				"char_id", member.UserID,
+				"party_id", nextState.PartyID,
+				"error", err)
+		}
+	}
+}
+
+// rebuildRuntimePartyUDPRelay 在成员变更（踢人/退出）后**整个重建**这把中继。
+//
+// 现场（2026-11-17 14:29）：打过副本的队伍踢人时，relay.Sync 只关掉了 4 条 leg、
+// 没有为剩下的两人的重建，客户端拿到的 op11 端口背后没人听 ⇒ 一直握手 ⇒ 防火墙。
+// 而城镇新建的队伍走同一条 Sync 每次都能重建。差别只在中继对象的内部状态（副本进出
+// 时被重置过），所以这里不猜条件，直接关掉再按"新建队伍"的路径重建一次。
+func (s *Service) rebuildRuntimePartyUDPRelay(state alignedcmd.PartyState) {
+	if s == nil || state.PartyID <= 0 {
+		return
+	}
+	if relay := s.partyRelayBackend(); relay != nil {
+		relay.CloseParty(uint16(state.PartyID))
+	}
+	s.syncRuntimePartyUDPRelay(state)
 }
