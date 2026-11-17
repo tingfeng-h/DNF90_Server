@@ -438,13 +438,6 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 		s.closeRuntimePartyUDPRelay(state.PartyID)
 	}
 	s.logPartyOperation(session, "leave", "client_leave_party_op13", previous, nextState)
-	s.refreshSurvivorDungeonScopedMemberTables(nextState, "party_leave_survivor_member_tables")
-	if nextState.PartyID > 0 {
-		if err := s.sendManagedRuntimePartySnapshots(nextState); err != nil {
-			s.logGameEvent(session, "game-party-leave-snapshot-failed",
-				"char_id", sourceID, "party_id", nextState.PartyID, "error", err)
-		}
-	}
 	if err := s.broadcastRuntimePartyMemberRemoved(state, nextState, sourceID, session); err != nil {
 		return err
 	}
@@ -557,15 +550,6 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 	s.logPartyOperation(session, "kick", "leader_kick_walkout", previousState, nextState,
 		"target_char_id", target.UserID,
 		"target_slot", parsed.Slot)
-	s.refreshSurvivorDungeonScopedMemberTables(nextState, "party_kick_survivor_member_tables")
-	// 成员变更后重发一次完整快照（op11 端点 + op153 + op9）：踢人会让中继的 pair 重建，
-	// 客户端手里的旧端点随即失效，只更新成员表的话会停在"连接中"。
-	if nextState.PartyID > 0 {
-		if err := s.sendManagedRuntimePartySnapshots(nextState); err != nil {
-			s.logGameEvent(session, "game-party-kick-snapshot-failed",
-				"char_id", identity.character, "party_id", nextState.PartyID, "error", err)
-		}
-	}
 	if err := s.sendGameUpperRawClassCodec(session, typ, []byte{1}, dnfproto.DefaultChannelClassification, true); err != nil {
 		return err
 	}
@@ -2717,33 +2701,6 @@ func currentPartySnapshotSlots(snapshot party.RuntimePartySnapshot) []byte {
 		}
 	}
 	return slots
-}
-// refreshSurvivorDungeonScopedMemberTables 把"存活者手里那条队伍记录"的成员表刷新成
-// 最新名单（kind2，不建不删）。
-//
-// 起因：中途有人退队后，客户端可能把"我的队伍"绑在退队者的记录上；只更新各人自己的
-// 记录不会改变他们的显示。对每条候选记录都发一次 kind2，才能保证无论客户端用哪条，
-// 看到的人数与成员都是最新的。
-func (s *Service) refreshSurvivorDungeonScopedMemberTables(nextState alignedcmd.PartyState, source string) {
-	if s == nil || nextState.PartyID <= 0 {
-		return
-	}
-	for _, member := range runtimePartyMembers(nextState) {
-		if member.UserID == 0 {
-			continue
-		}
-		session, ok := s.onlineGameSession(member.UserID)
-		if !ok || session == nil {
-			continue
-		}
-		if err := s.refreshDungeonScopedPartyMemberTables(session, stateForRuntimePartyReceiver(nextState, member.UserID), source); err != nil {
-			s.logGameEvent(session, "game-party-survivor-member-tables-failed",
-				"source", source,
-				"char_id", member.UserID,
-				"party_id", nextState.PartyID,
-				"error", err)
-		}
-	}
 }
 // rebuildRuntimePartyUDPRelay 在成员变更（踢人/退出）后**整个重建**这把中继。
 //
