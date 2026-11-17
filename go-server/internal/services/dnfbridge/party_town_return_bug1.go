@@ -167,6 +167,10 @@ func (s *Service) sendRuntimePartyTownReturnRebind(
 	s.resetRuntimePartyTownReturnUserState(session, receiverState)
 	// 2. 重发对端端点（必须排在 op9 之前，op9 才是触发握手的那一帧）。
 	if firstReturnRebind && bug1TownReturnEndpointReplayEnabled() {
+		// 本局发生过中途退图时，先整重建该队伍的中继，绕开远端中继 freshWindow 缓存跳过回城同步。
+		if hasPendingDepartedClientPartyAliases(session, receiverState) {
+			s.rebuildRuntimePartyUDPRelay(receiverState)
+		}
 		if _, err := s.sendRuntimePartyPeerEndpointInfo(session, receiverState, s.partyFormationOrder()); err != nil {
 			return err
 		}

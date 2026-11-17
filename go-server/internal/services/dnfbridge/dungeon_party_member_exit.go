@@ -96,7 +96,9 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 	if len(runtimePartyMembers(next)) < 2 {
 		s.closeRuntimePartyUDPRelay(int(before.ID))
 	} else {
-		s.syncRuntimePartyUDPRelay(next)
+		// 中途退图后整把重建：内置中继只关 D 的 leg、幸存者 leg 的 learnedEndpoint 仍是副本态；
+		// 远端中继还会因 freshWindow 缓存跳过回城同步。
+		s.rebuildRuntimePartyUDPRelay(next)
 	}
 	beforeLeaderState := before.StateFor(before.Leader)
 	beforeMembers := runtimePartyMembers(beforeLeaderState)
@@ -178,7 +180,7 @@ func (s *Service) leaveRuntimePartyDungeonMember(session *gameSession, instance 
 			}
 			for _, m := range runtimePartyMembers(next) {
 				if peerSession, ok := s.onlineGameSession(m.UserID); ok && peerSession != nil {
-					s.recordClientPartyAliasKeys(peerSession, aliasIDs, true)
+					s.recordClientPartyAliasKeys(peerSession, aliasIDs, false)
 				}
 			}
 			errs = errors.Join(errs, s.sendMemberGiveupSurvivorRosterAfterDeparture(next, instance, identity.character))
@@ -299,10 +301,10 @@ func (s *Service) resetDungeonSingletonPartyDisplay(receiver *gameSession, state
 
 func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession, state alignedcmd.PartyState, departingID uint16, owner byte, current func() bool) (bool, error) {
 	selection := currentPartyFrameOwnerSelection{Mode: currentPartyFrameOwnerExplicit, Owner: owner}
-	if departingID != 0 {
-		// 先给退图者的记录发 kind2（保留同批留存者名单），避免 kind3 清空
-		// 存活者的 [dungeon_actor+0x4C8]；顺序必须在幸存者主记录之前，
-		// 让客户端最后处理的 NOTI9 是把 +0x4C8 绑回主记录的那条。
+	if departingID != 0 && owner == currentSceneObjectContext {
+		// 仅在副本作用域(owner=0)下给退图者记录发 kind2（保留同批留存者名单），
+		// 避免 kind3 清空存活者的 [dungeon_actor+0x4C8]；绝不在城镇作用域(owner=ch)下投影
+		// departingID —— 那会在城镇作用域新建 record(D,ch) 抢走存活者的 [localPlayer+0x4C8]。
 		sent, err := s.sendCurrentPartyRecordProjectionInContext(receiver, receiver, state, "member_giveup_retained_record", nil, selection, departingID)
 		if err != nil || !sent {
 			return false, err
@@ -312,7 +314,7 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 		}
 	}
 	// 先发所有幸存队友（peers），最后发收包者自己（self），确保在 owner=channel 下
-	// 原生 0x29738FE 最终把 [local_actor+0x4C8] 绑定回 receiver 自己的记录。
+	// 原生 SetMemberUser 最终把 [local_actor+0x4C8] 绑回 receiver 自己的记录。
 	if owner == currentSceneObjectContext {
 		members := runtimePartyMembers(state)
 		for _, row := range members {
@@ -327,6 +329,15 @@ func (s *Service) sendMemberGiveupSurvivorRosterInContext(receiver *gameSession,
 			if err != nil || !sent {
 				return false, err
 			}
+		}
+	} else {
+		// 副本内 slotActors 全员非空、.gld127 校验通过（不会 P2P->closeAll），
+		// 先复位 record(self,ch) 槽位，让紧接着的 selfSent 必然命中 oldUser != newUser。
+		if err := s.resetSelfChannelRecordBeforeDungeonSurvivorRoster(receiver, state, owner, current); err != nil {
+			return false, err
+		}
+		if !current() {
+			return false, nil
 		}
 	}
 	selfSent, err := s.sendCurrentPartyActorFrameProjectionInContext(receiver, receiver, state, "member_giveup_survivor_dungeon_roster", nil, selection)
