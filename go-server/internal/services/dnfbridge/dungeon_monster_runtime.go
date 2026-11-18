@@ -202,6 +202,26 @@ func (r *runtimeDungeonRoom) Snapshot() runtimeDungeonRoomSnapshot {
 	}
 }
 
+// Location 零分配返回房间的坐标与地图 ID，避免仅做房间归属校验时调用 Snapshot() 深拷贝全部怪物。
+func (r *runtimeDungeonRoom) Location() (worldmap.RoomCoordinate, int64) {
+	if r == nil {
+		return worldmap.RoomCoordinate{}, 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.coordinate, r.mapID
+}
+
+// MatchesScene 零分配校验当前房间对象是否与给定场景属于同一坐标与地图。
+func (r *runtimeDungeonRoom) MatchesScene(scene worldmap.DungeonRoomScene) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.coordinate == scene.Coordinate && r.mapID == scene.Map.Map.ID
+}
+
 func (r *runtimeDungeonRoom) AttachExtendedActors(plan runtimeDungeonExtendedActorPlan) error {
 	if r == nil {
 		return errDungeonWorldMapUnavailable
@@ -464,6 +484,62 @@ func (r *runtimeDungeonRoom) AnnouncedMonster(objectKey uint32) (runtimeDungeonM
 // performs kill reward/quest checks from the logical monster/enemy code after a
 // death event; callers still own the actor state transition before using this
 // helper for EXP, drops, or quest trigger inputs.
+// MonsterByObjectKey 在读锁下按 objectKey O(1) 查找普通怪物并校验状态（零切片/Map 分配）。
+func (r *runtimeDungeonRoom) MonsterByObjectKey(
+	objectKey uint32,
+	allowedStates ...runtimeDungeonMonsterState,
+) (runtimeDungeonMonster, bool) {
+	if r == nil || objectKey == 0 {
+		return runtimeDungeonMonster{}, false
+	}
+	r.mu.RLock()
+	index, ok := r.byObjectKey[objectKey]
+	if !ok || index < 0 || index >= len(r.monsters) {
+		r.mu.RUnlock()
+		return runtimeDungeonMonster{}, false
+	}
+	monster := r.monsters[index]
+	r.mu.RUnlock()
+	if !runtimeDungeonMonsterStateAllowed(monster.State, allowedStates) {
+		return runtimeDungeonMonster{}, false
+	}
+	return monster, true
+}
+
+// HostileExtendedActorByObjectKey 在读锁下按 objectKey O(1) 查找敌对扩展 Actor 并校验状态。
+func (r *runtimeDungeonRoom) HostileExtendedActorByObjectKey(
+	objectKey uint32,
+	allowedStates ...runtimeDungeonMonsterState,
+) (runtimeDungeonExtendedActor, bool) {
+	if r == nil || objectKey == 0 {
+		return runtimeDungeonExtendedActor{}, false
+	}
+	r.mu.RLock()
+	index, ok := r.extendedByObjectKey[objectKey]
+	if !ok || index < 0 || index >= len(r.extendedActors) {
+		r.mu.RUnlock()
+		return runtimeDungeonExtendedActor{}, false
+	}
+	actor := r.extendedActors[index]
+	r.mu.RUnlock()
+	if actor.HostileReference == nil || !runtimeDungeonMonsterStateAllowed(actor.State, allowedStates) {
+		return runtimeDungeonExtendedActor{}, false
+	}
+	return actor, true
+}
+
+func runtimeDungeonMonsterStateAllowed(state runtimeDungeonMonsterState, allowedStates []runtimeDungeonMonsterState) bool {
+	if len(allowedStates) == 0 {
+		return true
+	}
+	for _, allowed := range allowedStates {
+		if state == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *runtimeDungeonRoom) MonsterByReference(
 	reference worldmap.HostileReference,
 	allowedStates ...runtimeDungeonMonsterState,
@@ -596,11 +672,12 @@ func (r *runtimeDungeonRoom) commitActorDeathReportPrepared(objectKey uint32, se
 	if session == nil {
 		return runtimeDungeonDeathTarget{}, false, worldmap.ErrDungeonRunRequired
 	}
-	scene, ok := session.Scene()
-	if !ok {
-		return runtimeDungeonDeathTarget{}, false, worldmap.ErrDungeonRunRequired
+	reference, bound, alreadyDefeated := session.LookupRuntimeObject(objectKey)
+	if !bound {
+		if _, hasScene := session.Scene(); !hasScene {
+			return runtimeDungeonDeathTarget{}, false, worldmap.ErrDungeonRunRequired
+		}
 	}
-	reference, bound := scene.RuntimeObjects[objectKey]
 	if !bound || reference != target.Reference {
 		return runtimeDungeonDeathTarget{}, false, fmt.Errorf(
 			"%w: object_key=%d expected=%s/%d actual=%s/%d bound=%t",
@@ -623,10 +700,8 @@ func (r *runtimeDungeonRoom) commitActorDeathReportPrepared(objectKey uint32, se
 		classified = err == nil
 	}
 	if prepare != nil {
-		for _, dead := range scene.DefeatedObjects {
-			if dead == objectKey {
-				return runtimeDungeonDeathTarget{}, false, worldmap.ErrHostileAlreadyDefeated
-			}
+		if alreadyDefeated {
+			return runtimeDungeonDeathTarget{}, false, worldmap.ErrHostileAlreadyDefeated
 		}
 		// Serialize death commits without holding the room state lock over SQL.
 		// Readers/ordinary loot callbacks remain free to inspect this room.

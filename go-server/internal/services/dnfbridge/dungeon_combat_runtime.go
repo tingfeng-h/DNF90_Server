@@ -427,8 +427,12 @@ func (s *Service) handleDungeonMonsterDeathRequest(
 	// related actor 写成队友（现场 `related_actor_object_key=6 player_object_key=3`）。
 	// 默认档（`party`）下同队同实例的队友攻击者按普通怪死亡结算，其余形状照旧拒收。
 	// 开关、取证与"退化成最小伤害 1"的判定见 dungeon_party_hit_owner.go。
-	hitOwnerMode := s.dungeonPartyHitOwnerGate()
-	hitOwner := s.resolveCurrentDungeonPartyHitOwner(session, runtime, request.OwnerObjectKey, hitOwnerMode)
+	hitOwnerMode, hitOwner := s.resolveCurrentDungeonPartyHitOwnerForActor(
+		session,
+		runtime,
+		request.OwnerObjectKey,
+		playerObjectKey,
+	)
 	if !scriptedTutorialDeath && !ownerSentinelBlockingClearTarget && !ownerSentinelOrdinaryTarget && !storyProcDeath &&
 		request.OwnerObjectKey != playerObjectKey &&
 		!roomProvenHostile &&

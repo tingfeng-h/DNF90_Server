@@ -121,6 +121,7 @@ func (s *Service) currentDungeonFriendlyOwnerDeath(
 		request.OwnerObjectKey == 0 || request.OwnerObjectKey == ^uint16(0) ||
 		request.Layout != dungeoncmd.DieMonsterRequestLayoutVariableCombat ||
 		runtime == nil || runtime.Room == nil || runtime.Session == nil ||
+		request.OwnerObjectKey == currentSceneActorObjectKey(characterIDOfRuntimeDungeonState(runtime)) ||
 		isPVFTutorialDungeon(runtime) || currentDungeonPathUsesTutorialNamespace(runtime.Dungeon.Path) ||
 		!currentDungeonFriendlyDeathTarget(runtime, scene, request.RuntimeObjectKey) {
 		return false
@@ -148,8 +149,7 @@ func currentDungeonFriendlyDeathTarget(
 	if runtime == nil || runtime.Room == nil || targetKey == 0 {
 		return false
 	}
-	room := runtime.Room.Snapshot()
-	if room.Coordinate != scene.Coordinate || room.MapID != scene.Map.Map.ID {
+	if !runtime.Room.MatchesScene(scene) {
 		return false
 	}
 	reference, bound := scene.RuntimeObjects[targetKey]

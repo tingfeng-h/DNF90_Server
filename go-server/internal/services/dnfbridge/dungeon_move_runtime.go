@@ -76,9 +76,9 @@ func (runtime *runtimeDungeonState) currentDungeonRoomVisit(
 	if visit == nil || visit.Room == nil {
 		return nil, fmt.Errorf("%w: room=%s map=%d visit_missing", errDungeonMoveRuntimeOwnerMismatch, scene.Coordinate, scene.Map.Map.ID)
 	}
-	snapshot := visit.Room.Snapshot()
+	coord, mapID := visit.Room.Location()
 	if visit.Room != runtime.Room || visit.Seed != runtime.Seed ||
-		snapshot.Coordinate != scene.Coordinate || snapshot.MapID != scene.Map.Map.ID {
+		coord != scene.Coordinate || mapID != scene.Map.Map.ID {
 		return nil, fmt.Errorf(
 			"%w: scene=%s/%d runtime_room=%p cached_room=%p cached_owner=%s/%d runtime_seed=%d cached_seed=%d",
 			errDungeonMoveRuntimeOwnerMismatch,
@@ -86,8 +86,8 @@ func (runtime *runtimeDungeonState) currentDungeonRoomVisit(
 			scene.Map.Map.ID,
 			runtime.Room,
 			visit.Room,
-			snapshot.Coordinate,
-			snapshot.MapID,
+			coord,
+			mapID,
 			runtime.Seed,
 			visit.Seed,
 		)
@@ -103,15 +103,15 @@ func (runtime *runtimeDungeonState) cacheCurrentDungeonRoom() error {
 	if !ok {
 		return worldmap.ErrDungeonRunRequired
 	}
-	snapshot := runtime.Room.Snapshot()
-	if snapshot.Coordinate != scene.Coordinate || snapshot.MapID != scene.Map.Map.ID {
+	coord, mapID := runtime.Room.Location()
+	if coord != scene.Coordinate || mapID != scene.Map.Map.ID {
 		return fmt.Errorf(
 			"%w: session_room=%s session_map=%d runtime_room=%s runtime_map=%d",
 			errDungeonMoveRuntimeOwnerMismatch,
 			scene.Coordinate,
 			scene.Map.Map.ID,
-			snapshot.Coordinate,
-			snapshot.MapID,
+			coord,
+			mapID,
 		)
 	}
 	if runtime.Rooms == nil {

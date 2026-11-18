@@ -53,8 +53,7 @@ func currentDungeonAnnouncedOrdinaryMonsterTarget(
 	if runtime == nil || runtime.Room == nil || runtime.Session == nil || objectKey == 0 || scene.Cleared {
 		return runtimeDungeonMonster{}, false
 	}
-	room := runtime.Room.Snapshot()
-	if room.Coordinate != scene.Coordinate || room.MapID != scene.Map.Map.ID {
+	if !runtime.Room.MatchesScene(scene) {
 		return runtimeDungeonMonster{}, false
 	}
 	monster, announced := runtime.Room.AnnouncedMonster(objectKey)
@@ -112,23 +111,7 @@ func currentDungeonRuntimeObjectBossActor(
 	if runtime == nil || runtime.Room == nil || objectKey == 0 {
 		return false, 0, ""
 	}
-	allowed := make(map[runtimeDungeonMonsterState]struct{}, len(allowedStates))
-	for _, state := range allowedStates {
-		allowed[state] = struct{}{}
-	}
-	stateAllowed := func(state runtimeDungeonMonsterState) bool {
-		if len(allowed) == 0 {
-			return true
-		}
-		_, ok := allowed[state]
-		return ok
-	}
-
-	room := runtime.Room.Snapshot()
-	for _, monster := range room.Monsters {
-		if monster.ObjectKey != objectKey || !stateAllowed(monster.State) {
-			continue
-		}
+	if monster, ok := runtime.Room.MonsterByObjectKey(objectKey, allowedStates...); ok {
 		if currentDungeonOrdinaryMonsterLooksBoss(monster) {
 			return true, 3, "86jp_monster_pvf_boss_rank"
 		}
@@ -141,11 +124,7 @@ func currentDungeonRuntimeObjectBossActor(
 		}
 		return false, actorType, "monster_actor_type_not_boss"
 	}
-	for _, actor := range room.ExtendedActors {
-		if actor.ObjectKey != objectKey || actor.HostileReference == nil ||
-			!stateAllowed(actor.State) {
-			continue
-		}
+	if actor, ok := runtime.Room.HostileExtendedActorByObjectKey(objectKey, allowedStates...); ok {
 		if currentDungeonIsBossActorType(actor.Packet.Type) {
 			return true, actor.Packet.Type, "86jp_extended_actor_type"
 		}

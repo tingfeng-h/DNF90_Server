@@ -86,6 +86,41 @@ func (s *DungeonSession) Location() (RoomCoordinate, int64) {
 	return s.scene.Coordinate, s.scene.Map.Map.ID
 }
 
+// IsCleared 零分配读取当前房间是否已清空（不深拷贝 Map 与 Actor 列表）。
+func (s *DungeonSession) IsCleared() bool {
+	if s == nil || s.run == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.scene.Cleared
+}
+
+// RunStatus 零分配读取当前副本运行状态（避免仅查 Status 时调用 Snapshot() 深拷贝整局地图）。
+func (s *DungeonSession) RunStatus() DungeonRunStatus {
+	if s == nil || s.run == nil {
+		return ""
+	}
+	s.run.mu.RLock()
+	defer s.run.mu.RUnlock()
+	return s.run.status
+}
+
+// LookupRuntimeObject 零分配查询当前房间场景中绑定的 objectKey 及其是否已击败。
+func (s *DungeonSession) LookupRuntimeObject(objectKey uint32) (reference HostileReference, bound bool, defeated bool) {
+	if s == nil || s.run == nil || objectKey == 0 {
+		return HostileReference{}, false, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reference, bound = s.scene.RuntimeObjects[objectKey]
+	if !bound {
+		return HostileReference{}, false, false
+	}
+	_, defeated = s.defeated[objectKey]
+	return reference, true, defeated
+}
+
 func NewDungeonSession(run *DungeonRun) (*DungeonSession, error) {
 	if run == nil {
 		return nil, ErrDungeonRunRequired
