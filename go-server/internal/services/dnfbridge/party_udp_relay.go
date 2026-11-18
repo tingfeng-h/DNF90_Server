@@ -56,6 +56,7 @@ type currentPartyUDPRelayLeg struct {
 	// "通道建了但一个包都没通"和"包来了但被源校验挡掉"混成同一个症状（都是零转发）。
 	received              uint64
 	lastReceivedAt        time.Time
+	lastMemoRefreshAt     time.Time
 	stallWatching         bool
 	stallRecoveryUsed     bool
 	stallRecoverySent     bool
@@ -159,6 +160,56 @@ func (reason relayLegDropReason) String() string {
 }
 
 // noteReceived 记一条"通过了源校验的数据报"。
+func currentPartyUDPRelayAddrEqual(a, b *net.UDPAddr) bool {
+	if a == nil || b == nil || a.Port != b.Port || a.Zone != b.Zone {
+		return false
+	}
+	return a.IP.Equal(b.IP)
+}
+
+// observeInboundEndpoint 封装单腿入向端点学习状态机（与 readLoop 的 Socket I/O 解耦）：
+//  1. 首次收包或端口漂移时 Copy-on-Write 替换 learnedEndpoint（不可变指针，杜绝 Data Race）；
+//  2. 端口未变时直接复用既有指针（0 堆分配）；
+//  3. 距上次refresh满 1 秒或端口变化时返回 refreshMemo=true，保证 memo.seenAt 始终新鲜
+//     （memo TTL 只有 30 秒，长局后网络波动重连才不会丢失引导目标）。
+func (leg *currentPartyUDPRelayLeg) observeInboundEndpoint(
+	source *net.UDPAddr,
+	now time.Time,
+) (firstLearn bool, portRebound bool, refreshMemo bool) {
+	if leg == nil || source == nil {
+		return false, false, false
+	}
+	leg.mu.Lock()
+	defer leg.mu.Unlock()
+	leg.received++
+	leg.lastReceivedAt = now
+
+	firstLearn = !leg.endpointKnown
+	sameEndpoint := !firstLearn && currentPartyUDPRelayAddrEqual(leg.learnedEndpoint, source)
+	portRebound = !firstLearn && !sameEndpoint
+	leg.endpointKnown = true
+
+	if firstLearn || portRebound {
+		leg.learnedEndpoint = cloneCurrentPartyUDPRelayAddr(source)
+	}
+	if firstLearn || portRebound || leg.lastMemoRefreshAt.IsZero() || now.Sub(leg.lastMemoRefreshAt) >= time.Second {
+		leg.lastMemoRefreshAt = now
+		refreshMemo = true
+	}
+	return firstLearn, portRebound, refreshMemo
+}
+
+// deliveryTarget 返回当前已学习的不可变目标端点指针（WriteToUDP 只读，无需每次深拷贝）。
+func (leg *currentPartyUDPRelayLeg) deliveryTarget() *net.UDPAddr {
+	if leg == nil {
+		return nil
+	}
+	leg.mu.Lock()
+	target := leg.learnedEndpoint
+	leg.mu.Unlock()
+	return target
+}
+
 func (leg *currentPartyUDPRelayLeg) noteReceived() uint64 {
 	if leg == nil {
 		return 0
@@ -930,18 +981,14 @@ func (r *currentPartyUDPRelay) readLoop(leg *currentPartyUDPRelayLeg) {
 			r.mu.Unlock()
 			return
 		}
-		leg.noteReceived()
-		leg.mu.Lock()
-		firstLearn := !leg.endpointKnown
-		leg.endpointKnown = true
-		leg.learnedEndpoint = cloneCurrentPartyUDPRelayAddr(source)
-		leg.mu.Unlock()
-		r.rememberEndpoint(leg, source)
+		firstLearn, portRebound, refreshMemo := leg.observeInboundEndpoint(source, time.Now())
+		if refreshMemo {
+			r.rememberEndpoint(leg, source)
+		}
 		r.mu.Unlock()
 		r.logStalledMemberTrafficResumed(leg)
-		if firstLearn {
-			// 首包留存重放：这条腿第一次学到"写给它的对端"的真实端点 ⇒ 把之前为它
-			// 留存下来的（对向腿的）首包原样补投过去。off 档下本函数立即返回。
+		if firstLearn || portRebound {
+			// 首次学习或网络波动导致 NAT 端口重映射：立即把待投队列补投到最新真实端点。
 			r.flushPendingProbes(leg)
 		}
 		r.logPendingProbeExpiry(leg)
@@ -978,9 +1025,7 @@ func (r *currentPartyUDPRelay) readLoop(leg *currentPartyUDPRelayLeg) {
 			r.traceRelayDatagram(leg, source, n, buffer[:n], "dropped_missing_opposite_leg")
 			continue
 		}
-		opposite.mu.Lock()
-		destination := cloneCurrentPartyUDPRelayAddr(opposite.learnedEndpoint)
-		opposite.mu.Unlock()
+		destination := opposite.deliveryTarget()
 		if destination == nil {
 			// 这条是**最隐蔽的黑洞**：对面那条腿还没发过任何数据报 ⇒ 没学到 endpoint ⇒
 			// 本方向的包全被丢弃。旧实现静默 continue，"通道建了但单向没通"看起来与

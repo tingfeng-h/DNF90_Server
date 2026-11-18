@@ -547,16 +547,8 @@ func (r *runtimeDungeonRoom) MonsterByReference(
 	if r == nil || reference.Kind != worldmap.HostileMonster || reference.Index < 0 {
 		return runtimeDungeonMonster{}, false
 	}
-	allowed := make(map[runtimeDungeonMonsterState]struct{}, len(allowedStates))
-	for _, state := range allowedStates {
-		allowed[state] = struct{}{}
-	}
 	stateAllowed := func(state runtimeDungeonMonsterState) bool {
-		if len(allowed) == 0 {
-			return true
-		}
-		_, ok := allowed[state]
-		return ok
+		return runtimeDungeonMonsterStateAllowed(state, allowedStates)
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -586,16 +578,8 @@ func (r *runtimeDungeonRoom) RewardEnemyByReference(
 	if r == nil || reference.Index < 0 {
 		return runtimeDungeonRewardEnemy{}, false
 	}
-	allowed := make(map[runtimeDungeonMonsterState]struct{}, len(allowedStates))
-	for _, state := range allowedStates {
-		allowed[state] = struct{}{}
-	}
 	stateAllowed := func(state runtimeDungeonMonsterState) bool {
-		if len(allowed) == 0 {
-			return true
-		}
-		_, ok := allowed[state]
-		return ok
+		return runtimeDungeonMonsterStateAllowed(state, allowedStates)
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()

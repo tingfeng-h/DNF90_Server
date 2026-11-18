@@ -582,10 +582,22 @@ func (s *Service) logGamePacket(session *gameSession, direction string, kind str
 		return
 	}
 	packetSeq := atomic.AddUint64(&session.packetSeq, 1)
+	if s == nil || !s.options.packetLogEnabled {
+		return
+	}
 	args := make([]any, 0, len(fields)+4)
 	args = append(args, "conn_id", session.connID, "pkt_seq", packetSeq)
 	args = append(args, fields...)
 	s.logPacket(direction, kind, data, args...)
+}
+
+// logGameEventLazy 供高频热路径（每只怪死亡/掉落的上百字段日志）使用：
+// 关闭包日志时连 buildFields 闭包都不执行，业务层无需散落 if 判断。
+func (s *Service) logGameEventLazy(session *gameSession, kind string, buildFields func() []any) {
+	if s == nil || !s.options.packetLogEnabled || buildFields == nil {
+		return
+	}
+	s.logGameEvent(session, kind, buildFields()...)
 }
 
 func (s *Service) logGameEvent(session *gameSession, kind string, fields ...any) {

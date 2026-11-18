@@ -131,9 +131,9 @@ type Service struct {
 	raids                     map[uint32]*runtimeRaidState
 	// 遭遇战临时队伍快照按 raid+run 保存在服务侧：客户端打完是切场景重连，
 	// per-session 的 runtime 会丢，挂在上面的快照也就没人能收口了。
-	fiendWarPartyMu           sync.Mutex
-	fiendWarEncounterParties  map[uint32]map[uint16]*fiendWarEncounterPartyEntry
-	currentRaidDisconnects    map[uint16]currentRaidDisconnectSeat
+	fiendWarPartyMu          sync.Mutex
+	fiendWarEncounterParties map[uint32]map[uint16]*fiendWarEncounterPartyEntry
+	currentRaidDisconnects   map[uint16]currentRaidDisconnectSeat
 	// Protected by raidMu; bounds queued deadline cleanup to one worker per runtime.
 	currentRaidDeadlineQueued map[*runtimeDungeonState]bool
 	currentRaidApplications   map[uint16]currentRaidApplication
@@ -145,9 +145,9 @@ type Service struct {
 	nextRaidSeq               uint32
 	// raidKeyEpoch 把进程级随机量折进攻坚队 key，避免重启后复用同一个 key
 	// 与客户端缓存的旧攻坚队撞车（现场症状：客户端没退、服务端重启后无法开团）。
-	raidKeyEpoch              uint16
-	packetLog                 *packetLogger
-	partyUDPRelay             *currentPartyUDPRelay
+	raidKeyEpoch  uint16
+	packetLog     *packetLogger
+	partyUDPRelay *currentPartyUDPRelay
 	// partyUDPRelayRemote 是 remote 档（厂商架构）的控制通道客户端：
 	// 注册到独立进程 a21-relay 换取端口矩阵，本进程不 bind 任何中继 UDP 端口。
 	// 与 partyUDPRelay 至多一个非 nil（由 newPartyUDPRelayBackends 决定）。
@@ -1050,6 +1050,9 @@ func (s *Service) openPacketLog() (*packetLogger, error) {
 }
 
 func (s *Service) logPacket(direction string, kind string, data []byte, fields ...any) {
+	if s == nil || !s.options.packetLogEnabled {
+		return
+	}
 	if suppressPacketLogLine(direction, kind, fields...) {
 		return
 	}
@@ -1059,7 +1062,29 @@ func (s *Service) logPacket(direction string, kind string, data []byte, fields .
 	logger.Log(direction, kind, data, fields...)
 }
 
+// dispatchFallbackDiagnosticEvent 只在没有包日志时把事件分发给各领域诊断钩子。
+func (s *Service) dispatchFallbackDiagnosticEvent(kind string, args ...any) {
+	s.logDungeonDeathTimingDiagnostic(kind, args...)
+	s.logTownLoadingDiagnostic(kind, args...)
+	s.logEmpireTeamSetupDiagnostic(kind, args...)
+	s.logDungeonSettlementDiagnostic(kind, args...)
+	s.logTownSelectorDiagnostic(kind, args...)
+	if kind == "game-peer-userinfo-profile-refresh-sent" || kind == "game-peer-userinfo-profile-refresh-failed" {
+		s.logCrossSceneProfileDiagnostic(kind, args...)
+	} else {
+		s.logRaidPeerDiagnostic(kind, args...)
+	}
+}
+
 func (s *Service) logPacketEvent(kind string, args ...any) {
+	if s == nil {
+		return
+	}
+	if !s.options.packetLogEnabled {
+		// 关闭包日志时跳过 suppress 的两遍字段扫描与全局锁。
+		s.dispatchFallbackDiagnosticEvent(kind, args...)
+		return
+	}
 	if suppressPacketLogEvent(kind, args...) {
 		return
 	}
@@ -1067,16 +1092,8 @@ func (s *Service) logPacketEvent(kind string, args ...any) {
 	logger := s.packetLog
 	s.mu.Unlock()
 	if logger == nil {
-		s.logDungeonDeathTimingDiagnostic(kind, args...)
-		s.logTownLoadingDiagnostic(kind, args...)
-		s.logEmpireTeamSetupDiagnostic(kind, args...)
-		s.logDungeonSettlementDiagnostic(kind, args...)
-		s.logTownSelectorDiagnostic(kind, args...)
-		if kind == "game-peer-userinfo-profile-refresh-sent" || kind == "game-peer-userinfo-profile-refresh-failed" {
-			s.logCrossSceneProfileDiagnostic(kind, args...)
-		} else {
-			s.logRaidPeerDiagnostic(kind, args...)
-		}
+		s.dispatchFallbackDiagnosticEvent(kind, args...)
+		return
 	}
 	logger.Event(kind, args...)
 }
@@ -1130,7 +1147,8 @@ func suppressPacketLogEvent(kind string, fields ...any) bool {
 
 func packetLogUintField(fields []any, name string) (uint64, bool) {
 	for i := 0; i+1 < len(fields); i += 2 {
-		if fmt.Sprint(fields[i]) != name {
+		key, ok := fields[i].(string)
+		if !ok || key != name {
 			continue
 		}
 		switch v := fields[i+1].(type) {
