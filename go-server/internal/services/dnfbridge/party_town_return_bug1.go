@@ -167,6 +167,9 @@ func (s *Service) sendRuntimePartyTownReturnRebind(
 	s.resetRuntimePartyTownReturnUserState(session, receiverState)
 	// 2. 重发对端端点（必须排在 op9 之前，op9 才是触发握手的那一帧）。
 	if firstReturnRebind && bug1TownReturnEndpointReplayEnabled() {
+		// 先确保中继端口在监听（尤其本局发生过中途退图、或中继刚被重建），再发 op11 端点，
+		// 否则 op11 里的端口背后没人听 → 客户端长时间"连接中.."。
+		s.syncRuntimePartyUDPRelay(receiverState)
 		if _, err := s.sendRuntimePartyPeerEndpointInfo(session, receiverState, s.partyFormationOrder()); err != nil {
 			return err
 		}

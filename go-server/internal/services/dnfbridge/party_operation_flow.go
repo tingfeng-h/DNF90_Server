@@ -65,7 +65,10 @@ func (s *Service) finishManagedPartyJoin(f partyJoinFinish) error {
 			return err
 		}
 	}
-	// 3. 权威快照（op11/op153/op9，顺序由 partyFormationOrder 决定）。
+	// 3. 先创建城镇同屏 CUser*（mode0/mode1 外观），再发 op11：
+	//    op11 先到会让客户端在 CUser* 还没建好时就开始握手 → "连接中.."。
+	s.refreshTownPartyActorsAfterJoin(f.State, f.Source+"_pre_snapshot")
+	// 4. 权威快照（op11/op153/op9，顺序由 partyFormationOrder 决定）。
 	if err := s.sendManagedRuntimePartySnapshots(f.State); err != nil {
 		return err
 	}

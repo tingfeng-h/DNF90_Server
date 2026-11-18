@@ -215,6 +215,15 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		if s.options.currentClientVersion == "official-24.9" {
 			targetParty = s.runtimePartyStateForSession(targetSession)
 		}
+		// 护栏：观察方与该 target 已在同一支队伍时，不要再用 record(target, ch) 抢绑
+		// [localPlayer+0x4C8]（否则后续 record(self,ch) 因 oldUser==newUser 无法绑回）。
+		if s.shouldSkipTownCopresencePartyFrame(session, targetSession) {
+			s.logGameEvent(session, "game-peer-selection-party-state-deferred",
+				"source_char_id", sourceID,
+				"target_id", parsed.TargetID,
+				"reason", "viewer_and_target_share_the_same_runtime_party")
+			return nil
+		}
 		projected, projectionErr := s.sendCurrentPartyActorFrameProjection(
 			session,
 			targetSession,
@@ -2333,6 +2342,17 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 	// 2026-09-27：这个判据必须用**未截断**的 int 频道号（客户端场景频道可能是 508
 	// 这种 >255 的值，任何 u8 都不等于它 ⇒ 那些行必须一律带身份块）。
 	localChannelID := currentClientSelectedChannelID(receiver)
+	// 兜底守卫：绝不给接收者投影"同队另一名成员的城镇记录"，否则 .prsafe 会把
+	// [localPlayer+0x4C8] 覆写成 record(other, ch)（铁律 3）。
+	// 本机记录（characterID == self，或 retainedRecordID == self 的保留记录）不受影响。
+	if partyActive && retainedRecordID != receiverIdentity.character &&
+		characterID != receiverIdentity.character &&
+		receiverOwnerChannel != currentSceneObjectContext &&
+		int(receiverOwnerChannel) == localChannelID {
+		if _, selfListed := currentSceneOp9PartyMemberSlot(projections, receiverIdentity.character); selfListed {
+			return false, nil
+		}
+	}
 	// 队伍名取自定义队名 / 队长名，而不是"被投影的 actor 自己的名字"：
 	// 否则每个队员的「我的队伍」和「队伍信息」都会显示自己的角色名。
 	displayName := characterName
@@ -2407,7 +2427,7 @@ func (s *Service) sendCurrentPartyRecordProjectionInContext(
 		if retainedRecordID != 0 {
 			projectedRecordID = retainedRecordID
 		}
-		s.recordClientPartyProjectionObserved(receiver, projectedRecordID, receiverOwnerChannel, localChannelID)
+		s.recordClientPartyProjectionObserved(receiver, projectedRecordID, receiverOwnerChannel, localChannelID, projections)
 	}
 	return sent, sendErr
 }

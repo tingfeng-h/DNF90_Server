@@ -679,6 +679,7 @@ func (r *currentPartyUDPRelay) syncGroup(pvp bool, partyID uint16, bindings []cu
 			toClose = append(toClose, existing)
 			delete(r.legs, key)
 			delete(r.usedPorts, int(existing.port))
+			delete(r.portOwners, int(existing.port))
 			if existing.key.pvp {
 				r.notePVPPortReleasedLocked(int(existing.port))
 			}
@@ -893,6 +894,7 @@ func (r *currentPartyUDPRelay) removePartyLocked(partyID uint16) []*currentParty
 		}
 		delete(r.legs, key)
 		delete(r.usedPorts, int(leg.port))
+		delete(r.portOwners, int(leg.port))
 		legs = append(legs, leg)
 	}
 	return legs

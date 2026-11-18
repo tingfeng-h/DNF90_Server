@@ -1,15 +1,15 @@
 package dnfbridge
 
 // 本文件是"客户端组队绑定协调器"：只负责 DNF.exe 侧 CPartyRecord 绑定([localPlayer+0x4C8])
-// 的跟踪与修复，不承担任何业务判断（谁在队里、谁是队长由 RuntimePartyManager 决定）。
+// 的跟踪与别名记录清理，不承担业务判断。
 //
-// 依据（客户端逆向，见 Docs 之外的分析记录）：
-//   - [actor+0x4C8] 全程序只有 7 处写入；其中 record(self,ch) 想重新绑定自己，
-//     必须满足 CPartyRecord::SetMemberUser(0x029733B0) 里 oldUser != newUser；
-//   - 若某条非本机的城镇记录 record(D,ch) 先把 [self+0x4C8] 抢绑走，
-//     之后所有 record(self,ch) 的 kind0/kind2 都会因 oldUser==newUser 变成空操作。
-// 因此需要在"被抢绑过"的会话上先发一条空 kind2 把 record(self,ch) 的槽位复位成 0xFFFF，
-// 再发权威 kind0，才能把绑定夺回；随后才能安全用 kind3 清掉退图者的残留记录。
+// 客户端铁律（.prsafe 0x06EC5000..0x06EC5373 反汇编结论）：
+//   1. 空 kind2 / kind3 只有在 [actor+0x4C8] == this 时才把绑定清零；
+//   2. 回城时 op24 重建 localPlayer、[localPlayer+0x4C8] == 0，此时一条 record(self,ch) 的
+//      kind0 会由 0x06EC536B 自动绑回（oldUser==newUser 也绑），不需要先发空 kind2；
+//   3. 若把同队其他成员的 record(other,ch)（名单含本机）投影给该客户端，0x029738FE 会把
+//      [localPlayer+0x4C8] 强行覆写成 record(other,ch)（抢绑）。
+// 因此本文件不再发送任何"空 kind2 复位"，只做：登记历史别名 → 需要时用 kind3 清理。
 
 import (
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
@@ -18,40 +18,51 @@ import (
 
 // partyClientBindingState 是单个会话的客户端绑定投影账本（受 session.party.mu 保护）。
 type partyClientBindingState struct {
-	// foreignChannelRecordBound 表示 [localPlayer+0x4C8] 曾被"非本机、owner==频道号"的记录抢绑。
+	// foreignChannelRecordBound 表示曾出现过"本机记录需要重新绑定"的时机（仅作观测）。
 	foreignChannelRecordBound bool
 	// retainedAliasKeys 是当前组队周期内向该客户端投影过的非本机角色 ID（如中途退图者）。
-	// 只在下发 kind3 退役或整队离场时消费。
 	retainedAliasKeys map[uint16]struct{}
 }
 
 // recordClientPartyProjectionObserved 在向 receiver 实际发出非空 NOTI 9(kind0/kind2) 后登记。
+//
+// 只有"名单里包含接收者本人"的非本机城镇记录才登记别名：那类记录才是抢绑源，
+// 它们对应的角色（如中途退图者 D）后续才需要用 kind3 静默清理。
+// 本机城镇记录（roleID == self 且 owner == ch）说明绑定已回到自己身上，顺带清掉观测标志。
 func (s *Service) recordClientPartyProjectionObserved(
 	receiver *gameSession,
 	recordCharacterID uint16,
 	ownerChannel byte,
 	localChannelID int,
+	projections ...[]currentSceneOp9PartyMemberProjection,
 ) {
 	if s == nil || receiver == nil || recordCharacterID == 0 {
 		return
 	}
 	selfID := receiver.selectedCharacterID
-	if selfID == 0 || recordCharacterID == selfID {
+	if selfID == 0 {
 		return
 	}
 	receiver.party.mu.Lock()
 	if receiver.party.clientBinding.retainedAliasKeys == nil {
 		receiver.party.clientBinding.retainedAliasKeys = make(map[uint16]struct{}, 4)
 	}
-	receiver.party.clientBinding.retainedAliasKeys[recordCharacterID] = struct{}{}
-	if ownerChannel != currentSceneObjectContext && int(ownerChannel) == localChannelID {
-		receiver.party.clientBinding.foreignChannelRecordBound = true
+	if recordCharacterID != selfID && ownerChannel != currentSceneObjectContext {
+		for _, batch := range projections {
+			if _, listed := currentSceneOp9PartyMemberSlot(batch, selfID); listed {
+				receiver.party.clientBinding.retainedAliasKeys[recordCharacterID] = struct{}{}
+				break
+			}
+		}
+	}
+	if recordCharacterID == selfID && ownerChannel != currentSceneObjectContext {
+		receiver.party.clientBinding.foreignChannelRecordBound = false
 	}
 	receiver.party.mu.Unlock()
 }
 
 // recordClientPartyAliasKeys 批量登记该客户端接触过的非本机角色记录键。
-func (s *Service) recordClientPartyAliasKeys(receiver *gameSession, characterIDs []uint16, markForeignChannelHijacked bool) {
+func (s *Service) recordClientPartyAliasKeys(receiver *gameSession, characterIDs []uint16, _ bool) {
 	if s == nil || receiver == nil || len(characterIDs) == 0 {
 		return
 	}
@@ -65,13 +76,10 @@ func (s *Service) recordClientPartyAliasKeys(receiver *gameSession, characterIDs
 			receiver.party.clientBinding.retainedAliasKeys[id] = struct{}{}
 		}
 	}
-	if markForeignChannelHijacked {
-		receiver.party.clientBinding.foreignChannelRecordBound = true
-	}
 	receiver.party.mu.Unlock()
 }
 
-// takeForeignChannelRecordHijacked 原子检查并消费"曾被抢绑"标志。
+// takeForeignChannelRecordHijacked 原子检查并消费"曾被抢绑"标志（仅观测用）。
 func takeForeignChannelRecordHijacked(receiver *gameSession) bool {
 	if receiver == nil {
 		return false
@@ -139,49 +147,23 @@ func consumeAllClientPartyAliasKeysOnDeparture(receiver *gameSession) []uint16 {
 	return out
 }
 
-// resetUnboundSelfChannelRecordIfHijacked 在绑定被抢时，先给 record(self,ch) 发空 kind2 复位槽位。
-// 此时 [self+0x4C8] != record(self,ch)，客户端走 wasBound==0 && isNowBound==0 静默分支：
-// 不关 P2P、不清血条、不弹提示，只把 memberUsers[0..7] 复位成 0xFFFF。
+// resetUnboundSelfChannelRecordIfHijacked 不再发送空 kind2。
+//
+// 客户端铁律 2：回城时 [localPlayer+0x4C8] 已被 op24 重建清零，随后任意一条
+// record(self,ch) 的 kind0 都会由 0x06EC536B 自动绑回；而在城镇里对已绑定的记录发空 kind2
+// 反而会命中 0x06EC50BE 把绑定清零 → wasBound1→0 → "已退出队伍" + P2P->closeAll → 重组/连接中。
+// 因此这里只消费观测标志，不发任何包。
 func (s *Service) resetUnboundSelfChannelRecordIfHijacked(
-	receiver *gameSession,
-	state alignedcmd.PartyState,
-	source string,
+	_ *gameSession,
+	_ alignedcmd.PartyState,
+	_ string,
 ) error {
-	if s == nil || receiver == nil || receiver.selectedCharacterID == 0 || state.PartyID <= 0 {
-		return nil
-	}
-	if s.options.currentClientVersion != "official-24.9" {
-		return nil
-	}
-	if !takeForeignChannelRecordHijacked(receiver) {
-		return nil
-	}
-	channel := currentClientSelectedChannel(receiver)
-	if channel == currentSceneObjectContext {
-		return nil
-	}
-	body := s.buildCurrentPartyDepartureBody(receiver.selectedCharacterID, channel)
-	if _, err := s.sendRetiredPartyPacket(
-		receiver,
-		uint16(dnfenum.CmdPacketRecoverStamina),
-		body,
-		&state,
-		nil,
-		false,
-	); err != nil {
-		return err
-	}
-	s.logGameEvent(receiver, "game-party-client-self-record-pre-rebind-reset",
-		"source", source,
-		"char_id", receiver.selectedCharacterID,
-		"owner_channel", channel,
-		"party_id", state.PartyID,
-		"reason", "reset_unbound_self_record_slots_so_setmemberuser_rebinds_local_actor_from_departed_alias")
 	return nil
 }
 
-// retireDepartedPartyAliasRecordsAfterSelfRebind 在绑定已回到 record(self,ch) 之后，
-// 用 kind3 静默退役已不在队伍中的历史记录（如中途退图者 D）的两套 owner。
+// retireDepartedPartyAliasRecordsAfterSelfRebind 用 kind3 静默退役已不在队伍中的历史记录
+// （如中途退图者 D）的两套 owner。kind3 在旧码 0x029733B0 里把旧主用户写回，
+// 只要 [localPlayer+0x4C8] 指向 record(self,ch)，就不会在销毁别条记录时触发退队。
 func (s *Service) retireDepartedPartyAliasRecordsAfterSelfRebind(
 	receiver *gameSession,
 	state alignedcmd.PartyState,
