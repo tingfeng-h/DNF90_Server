@@ -821,8 +821,29 @@ func containsHostileReference(values []HostileReference, want HostileReference) 
 	return false
 }
 
+// SceneSharedMap 返回与 Scene() 等价的快照，但**不深拷贝解析后的地图**（PVF 派生数据）。
+//
+// 全仓没有任何路径修改 DungeonRoomScene.Map（审计：唯一的写入是会话内部的
+// DefeatedObjects append 与本文件的 clone），所以地图在房间构造后只读，可以安全共享。
+// 副本内每条 op39 会重复读 4~5 次场景，这里省下的是 TileMapRows / SourceSections 等
+// 约 40 个字段的深拷贝。调用方必须把返回值的 Map 当作只读。
+func (s *DungeonSession) SceneSharedMap() (DungeonRoomScene, bool) {
+	if s == nil || s.run == nil {
+		return DungeonRoomScene{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneDungeonRoomSceneMutable(s.scene), true
+}
+
 func cloneDungeonRoomScene(in DungeonRoomScene) DungeonRoomScene {
 	in.Map.Map = cloneMap(in.Map.Map)
+	return cloneDungeonRoomSceneMutable(in)
+}
+
+// cloneDungeonRoomSceneMutable 只拷贝可变部分（成员表、已击败集合、运行时对象索引），
+// 共享 in.Map 中只读的解析结果。
+func cloneDungeonRoomSceneMutable(in DungeonRoomScene) DungeonRoomScene {
 	in.Monsters = append([]MonsterSpawn(nil), in.Monsters...)
 	in.NPCs = cloneNPCSpawns(in.NPCs)
 	in.AICharacters = cloneAICharacters(in.AICharacters)
