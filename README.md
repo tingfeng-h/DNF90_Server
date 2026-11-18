@@ -19,6 +19,43 @@
 > [!IMPORTANT]
 > **公开源码与贡献入口已迁至 [GitHub Cec1c/ServerS5A3](https://github.com/Cec1c/ServerS5A3)。新修复请提交 [GitHub PR](https://github.com/Cec1c/ServerS5A3/pulls)。** GitGud 仅为异步镜像；服务端 CI 只验证 Linux。开发机与 Agent 请按 [迁移交接](Docs/GITHUB_AUTHORITY_MIGRATION.md) 更新规则。
 
+---
+
+## 本服组队修复基线：中途退图 → 回城踢人/退队（2026-11-18）
+
+> 本章节描述本服（`tingfeng-h/DNF90_Server`）相对上游基线的组队修复。上游代码未改动语义，所有改动集中在
+> `go-server/internal/services/dnfbridge` 的组队投影路径。
+
+### 修了什么
+
+| # | 问题 | 根因 | 修复 |
+| :-- | :--- | :--- | :--- |
+| 1 | 中途退图后回城踢人/退队：血条不消失、退不干净 | `sendMemberGiveupSurvivorRosterInContext` 会在 `owner=频道号` 作用域下给退图者投影一条 `record(D,ch)`（名单含幸存者），客户端 `.prsafe` 的 `SetMemberUser` 把 `[localPlayer+0x4C8]` 抢绑到 `record(D,ch)`，之后所有 `record(self,ch)` 因 `oldUser==newUser` 变成空操作 | 退图者的 `kind2` 只在 `owner=0`（副本作用域）发送；回城后用 `kind3` 静默退役 `(D,0)`/`(D,ch)` |
+| 2 | 回城后队长看队员红电脑 | 回城重绑时先发空 `kind2` 复位，触发 `wasBound 1→0` → `P2P->closeAll()` | 删除全部空 `kind2` 复位；回城依赖 `.prsafe 0x06EC536B`（`[localPlayer+0x4C8]==0` 时自动绑回） |
+| 3 | 副本内有人退图后，剩余队员"已退出队伍→重新组队→连接中→防火墙" | 副本内（`scene=3`）`.prsafe` 不拦空 `kind2`，会把绑定清零；随后 `kind0` 又走 `0→1` 建队分支 | 副本内不再发空 `kind2`；退图后中继只 `sync`（不 `CloseParty`），不掐断幸存者 UDP |
+| 4 | 城镇反复踢人/重新组人：缺血条槽位、连接中、红电脑 | 点击队友（`mode 15`）会把同队 `record(other,ch)` 抢绑本机；`op11` 早于 `CUser*` 创建；中继 `portOwners` 残留 | `mode 15` 与记录投影双守卫（永不投影"同队非本机的城镇记录"）；入队先建 `CUser*` 再发 `op11`；`Sync`/`CloseParty` 同步清 `portOwners`；`op10` 用权威槽位 `target.Slot` |
+
+### 关键实现文件
+
+- `party_client_binding_reconciler.go`（新增）：会话级绑定账本（历史别名 + 观测标志），**不再发送任何空 kind2**，只按需 `kind3` 清理
+- `party_online.go`：`mode 15` 同队跳过、投影兜底守卫、`op10` 权威槽位、成员移除前后清理
+- `dungeon_party_member_exit.go`：退图者只投 `owner=0`；中继 `sync`
+- `party_town_return_bug1.go`：回城重绑顺序（`sync` 中继 → `op11` → 名单 → 退役别名）
+- `party_operation_flow.go`：入队先 `refreshTownPartyActorsAfterJoin` 再发快照
+- `party_udp_relay.go`：删除 leg 时清 `portOwners`
+
+### 当前线上基线
+
+| 项 | 值 |
+| :-- | :--- |
+| 源码 | 本分支 HEAD（tag `baseline-20261118`） |
+| 镜像 | `servers5a3-upstream:v15-r4`（`be77ee836c64`） |
+| 二进制 sha256 | `a28bcee8cbbdc4e9d7796c544210ee36a2a58817b2a6b56c8b79b10191267362` |
+| 回滚点 | `rollback-before-v15r4` = `e46bdf84af39` |
+
+详细还原过程、客户端逆向依据与逐版回归记录见 [Docs/PARTY_MID_DUNGEON_LEAVE_FIX_20261118.md](Docs/PARTY_MID_DUNGEON_LEAVE_FIX_20261118.md)。
+
+
 > [!IMPORTANT]
 > **先选对频道表，再启动服务。** 首次 `prepare` 必须显式传入 `--channel-info`，使用[完整的 120 频道外部 ETC](go-server/internal/services/dnfbridge/testdata/channel_info.etc)，并按[频道表部署说明](Docs/CHANNEL_TABLE_DEPLOYMENT.md)核对。PVF 内置表曾出现能解析、却无法完成登录的情况；更新 PVF 时保留已选外部表，部署后核对实际加载路径、摘要和频道目录。
 
