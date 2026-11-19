@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// 移植自上游 0b573e81：拥塞的游戏流需要比存储操作更长的恢复时间。
+//
+// 不直接放大 createWriteTimeout：那是数据库锁与事务的期限，跟着放大只会在高负载
+// 时放大压力。这里只为"游戏连接上的发送/等待发送锁"单独给 30 秒；完全不再读取
+// 数据的对端仍会被这个上界释放，不会永久占住连接。
+const gameTransportWriteTimeout = 30 * time.Second
+
 // Fixed metadata only. Buffered batches and provider controls deliberately
 // have no attributed inner opcode; never guess from encrypted wire bytes.
 type gameWritePacketDiagnostic struct {
@@ -55,7 +62,7 @@ func gameTransportBudget(p *gameSession, parent context.Context) (context.Contex
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, createWriteTimeout)
+	ctx, cancel := context.WithTimeout(parent, gameTransportWriteTimeout)
 	lifetime := p.gameTransportContext()
 	stop := context.AfterFunc(lifetime, cancel)
 	if lifetime.Err() != nil {

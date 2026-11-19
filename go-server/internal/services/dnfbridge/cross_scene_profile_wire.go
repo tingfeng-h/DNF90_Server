@@ -112,7 +112,7 @@ func (s *Service) sendCurrentCrossSceneProfileFramesWithPolicy(ctx context.Conte
 	if immutableRefresh && len(bodies) != 1 {
 		return false, errors.New("automatic cross-scene refresh requires one immutable frame")
 	}
-	ctx, cancel := context.WithTimeout(ctx, createWriteTimeout)
+	ctx, cancel := context.WithTimeout(ctx, gameTransportWriteTimeout)
 	defer cancel()
 	if viewer == nil || viewer.conn == nil || actor == nil {
 		return false, errors.New("cross-scene profile connection unavailable")
@@ -143,7 +143,7 @@ func (s *Service) sendCurrentCrossSceneProfileFramesWithPolicy(ctx context.Conte
 		// the protected wire must complete within its own bounded window; a
 		// shared raid preparation deadline is not evidence of a slow socket.
 		var cancelWrite context.CancelFunc
-		writeCtx, cancelWrite = context.WithTimeout(context.WithoutCancel(ctx), createWriteTimeout)
+		writeCtx, cancelWrite = context.WithTimeout(context.WithoutCancel(ctx), gameTransportWriteTimeout)
 		stopCancel := context.AfterFunc(ctx, func() {
 			if errors.Is(ctx.Err(), context.Canceled) {
 				cancelWrite()
