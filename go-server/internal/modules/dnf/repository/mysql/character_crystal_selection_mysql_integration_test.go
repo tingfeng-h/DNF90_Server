@@ -84,7 +84,7 @@ func TestMySQLCharacterCrystalSelectionNonePersistsAcrossFreshRepositories(t *te
 		Level:       1,
 		Stats: map[string]int64{
 			mysqlCharacterCrystalSelectionStatColumn: -1,
-			"gold":                                  42,
+			"gold":                                   42,
 		},
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -151,4 +151,3 @@ func TestMySQLCharacterCrystalSelectionNonePersistsAcrossFreshRepositories(t *te
 		t.Fatalf("after partial save gold=%d, want 43", reloaded.Stats["gold"])
 	}
 }
-

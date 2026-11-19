@@ -719,22 +719,37 @@ func (o *Owner) Search(ctx context.Context, itemIDs []uint32) ([]Listing, error)
 	if o == nil {
 		return nil, ErrUnavailable
 	}
-	if err := o.EnsureEscrow(ctx); err != nil {
-		return nil, err
-	}
-	record, found, err := o.repositories.Inventory.Load(ctx, EscrowCharacterID)
-	if err != nil || !found {
-		return nil, err
-	}
 	wanted := make(map[int64]struct{}, len(itemIDs))
+	var singleItemID int64
 	for _, itemID := range itemIDs {
 		if itemID != 0 {
-			wanted[int64(itemID)] = struct{}{}
+			singleItemID = int64(itemID)
+			wanted[singleItemID] = struct{}{}
 		}
+	}
+	var slots map[string]dnfrepo.ItemStack
+	if reader, ok := o.repositories.Inventory.(dnfrepo.InventorySlotItemPrefixReader); ok && len(wanted) == 1 {
+		var err error
+		slots, err = reader.LoadInventorySlotItemPrefix(ctx, EscrowCharacterID, listingPrefix, singleItemID)
+		if err != nil {
+			return nil, err
+		}
+	} else if reader, ok := o.repositories.Inventory.(dnfrepo.InventorySlotPrefixReader); ok {
+		var err error
+		slots, err = reader.LoadInventorySlotPrefix(ctx, EscrowCharacterID, listingPrefix)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		record, found, err := o.repositories.Inventory.Load(ctx, EscrowCharacterID)
+		if err != nil || !found {
+			return nil, err
+		}
+		slots = record.Slots
 	}
 	now := o.clock()
 	result := make([]Listing, 0)
-	for key, stack := range record.Slots {
+	for key, stack := range slots {
 		if !strings.HasPrefix(key, listingPrefix) {
 			continue
 		}
