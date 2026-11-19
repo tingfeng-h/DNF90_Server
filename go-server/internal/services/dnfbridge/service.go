@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"time"
 
@@ -145,9 +146,10 @@ type Service struct {
 	nextRaidSeq               uint32
 	// raidKeyEpoch 把进程级随机量折进攻坚队 key，避免重启后复用同一个 key
 	// 与客户端缓存的旧攻坚队撞车（现场症状：客户端没退、服务端重启后无法开团）。
-	raidKeyEpoch  uint16
-	packetLog     *packetLogger
-	partyUDPRelay *currentPartyUDPRelay
+	raidKeyEpoch      uint16
+	packetLog         *packetLogger
+	packetLogDisabled atomic.Bool
+	partyUDPRelay     *currentPartyUDPRelay
 	// partyUDPRelayRemote 是 remote 档（厂商架构）的控制通道客户端：
 	// 注册到独立进程 a21-relay 换取端口矩阵，本进程不 bind 任何中继 UDP 端口。
 	// 与 partyUDPRelay 至多一个非 nil（由 newPartyUDPRelayBackends 决定）。
@@ -425,6 +427,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.channelScript = append([]byte(nil), channelScript...)
 	s.cancel = cancel
 	s.packetLog = packetLog
+	s.packetLogDisabled.Store(packetLog == nil)
 	if s.initialTownEntryWait == nil {
 		// Initial-town visual delay is disabled. Production never blocks the
 		// server packet stream at the retained test boundary.
@@ -470,6 +473,7 @@ func (s *Service) Start(ctx context.Context) error {
 			s.catalog = nil
 			s.cancel = nil
 			s.packetLog = nil
+			s.packetLogDisabled.Store(true)
 			s.mu.Unlock()
 			return errors.Join(err, closeErr)
 		}
@@ -484,6 +488,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.catalog = nil
 		s.cancel = nil
 		s.packetLog = nil
+		s.packetLogDisabled.Store(true)
 		s.mu.Unlock()
 		return errors.Join(fmt.Errorf("dnfbridge has no game listen ports"), closeErr)
 	}
@@ -495,6 +500,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.catalog = nil
 		s.cancel = nil
 		s.packetLog = nil
+		s.packetLogDisabled.Store(true)
 		s.mu.Unlock()
 		return errors.Join(err, closeErr)
 	}
@@ -512,6 +518,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.catalog = nil
 		s.cancel = nil
 		s.packetLog = nil
+		s.packetLogDisabled.Store(true)
 		s.partyUDPRelay = nil
 		s.partyUDPRelayRemote = nil
 		s.mu.Unlock()
@@ -891,6 +898,7 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.listeners = nil
 	s.cancel = nil
 	s.packetLog = nil
+	s.packetLogDisabled.Store(true)
 	s.partyUDPRelay = nil
 	s.partyUDPRelayRemote = nil
 	s.channelScript = nil
@@ -1050,7 +1058,7 @@ func (s *Service) openPacketLog() (*packetLogger, error) {
 }
 
 func (s *Service) logPacket(direction string, kind string, data []byte, fields ...any) {
-	if s == nil || !s.options.packetLogEnabled {
+	if s == nil || s.packetLogDisabled.Load() {
 		return
 	}
 	if suppressPacketLogLine(direction, kind, fields...) {
@@ -1080,9 +1088,7 @@ func (s *Service) logPacketEvent(kind string, args ...any) {
 	if s == nil {
 		return
 	}
-	if !s.options.packetLogEnabled {
-		// 关闭包日志时跳过 suppress 的两遍字段扫描与全局锁。
-		s.dispatchFallbackDiagnosticEvent(kind, args...)
+	if s.packetLogDisabled.Load() && !packetEventHasDiagnostic(kind) {
 		return
 	}
 	if suppressPacketLogEvent(kind, args...) {
@@ -1147,8 +1153,7 @@ func suppressPacketLogEvent(kind string, fields ...any) bool {
 
 func packetLogUintField(fields []any, name string) (uint64, bool) {
 	for i := 0; i+1 < len(fields); i += 2 {
-		key, ok := fields[i].(string)
-		if !ok || key != name {
+		if key, ok := fields[i].(string); !ok || key != name {
 			continue
 		}
 		switch v := fields[i+1].(type) {
