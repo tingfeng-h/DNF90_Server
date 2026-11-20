@@ -18,25 +18,6 @@ func (u *mysqlCeraShopAssetUnitOfWork) WithinBuffOwnedSnapshot(
 		repository.EquipmentRepository, repository.SettingsRepository,
 		repository.BuffPetMetadataReader, repository.OwnedLegacyInventoryRepository) error,
 ) error {
-	return u.withinBuffOwnedSnapshot(ctx, accountID, characterID, settingsScope, apply, false)
-}
-
-func (u *mysqlCeraShopAssetUnitOfWork) WithinBuffOwnedReadSnapshot(
-	ctx context.Context, accountID, characterID, settingsScope string,
-	apply func(repository.CharacterRepository, repository.InventoryRepository,
-		repository.EquipmentRepository, repository.SettingsRepository,
-		repository.BuffPetMetadataReader, repository.OwnedLegacyInventoryRepository) error,
-) error {
-	return u.withinBuffOwnedSnapshot(ctx, accountID, characterID, settingsScope, apply, true)
-}
-
-func (u *mysqlCeraShopAssetUnitOfWork) withinBuffOwnedSnapshot(
-	ctx context.Context, accountID, characterID, settingsScope string,
-	apply func(repository.CharacterRepository, repository.InventoryRepository,
-		repository.EquipmentRepository, repository.SettingsRepository,
-		repository.BuffPetMetadataReader, repository.OwnedLegacyInventoryRepository) error,
-	readOnly bool,
-) error {
 	accountID, characterID, settingsScope = strings.TrimSpace(accountID), strings.TrimSpace(characterID), strings.TrimSpace(settingsScope)
 	if u == nil || accountID == "" || characterID == "" || settingsScope != "character:"+characterID+":buff_swap_native" || apply == nil {
 		return repository.ErrBuffOwnedSnapshotUnavailable
@@ -51,7 +32,7 @@ func (u *mysqlCeraShopAssetUnitOfWork) withinBuffOwnedSnapshot(
 	if !ok {
 		return repository.ErrBuffOwnedSnapshotUnavailable
 	}
-	tx, err := beginObservedSQLTransaction(ctx, beginner, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: readOnly})
+	tx, err := beginObservedSQLTransaction(ctx, beginner, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return err
 	}
@@ -60,8 +41,8 @@ func (u *mysqlCeraShopAssetUnitOfWork) withinBuffOwnedSnapshot(
 	router.db = newSQLTransactionDB(tx.Tx, router.db)
 	router.readDBs = append([]string(nil), u.router.writeDBs...)
 	router.writeDBs = append([]string(nil), u.router.writeDBs...)
-	router.lockReads = !readOnly
-	router.consistentRead = readOnly
+	router.lockReads = false
+	router.consistentRead = true
 	group := newMySQLGroupFromRouter(router, false)
 	characters := &rentalScopedCharacterRepository{characterID: characterID, base: group.Character}
 	inventories := &rentalScopedInventoryRepository{characterID: characterID, base: &mysqlBuffInventoryStore{mysqlBagStore{mysqlStoreBase: mysqlStoreBase{router: router}}}}
@@ -76,8 +57,7 @@ func (u *mysqlCeraShopAssetUnitOfWork) withinBuffOwnedSnapshot(
 	if !found || character.CharacterID != characterID || character.AccountID != accountID {
 		return errors.Join(repository.ErrBuffLegacyOwnerMismatch, tx.Rollback())
 	}
-	// Writers lock Character then exact Settings before assets. Readers use a
-	// single consistent MVCC view, without acquiring those writer locks.
+	// Read exact Settings before assets in the same consistent MVCC snapshot.
 	if _, _, err := settings.Load(ctx, settingsScope); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}

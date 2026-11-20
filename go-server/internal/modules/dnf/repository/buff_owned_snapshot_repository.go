@@ -18,13 +18,6 @@ type BuffOwnedSnapshotUnitOfWork interface {
 		func(CharacterRepository, InventoryRepository, EquipmentRepository, SettingsRepository, BuffPetMetadataReader, OwnedLegacyInventoryRepository) error) error
 }
 
-// Read-only projections may use MVCC without taking the registration writer's
-// locks. Registration and identity migration keep the original writable contract.
-type BuffOwnedReadSnapshotUnitOfWork interface {
-	WithinBuffOwnedReadSnapshot(context.Context, string, string, string,
-		func(CharacterRepository, InventoryRepository, EquipmentRepository, SettingsRepository, BuffPetMetadataReader, OwnedLegacyInventoryRepository) error) error
-}
-
 // This separate read interface never manufactures current Inventory assets.
 type OwnedLegacyInventoryRepository interface {
 	SelectOwnedBuffItems(context.Context, string, []byte) ([]OwnedLegacyItem, error)
@@ -72,14 +65,6 @@ type BuffPetMetadataReader interface {
 // Only this wrapper passes the scoped transaction repositories to the domain.
 // Lack of the optional capability retains current-only registration behavior.
 func WithinBuffOwnedSnapshot(ctx context.Context, base Group, characterID, accountID string, apply func(Group) error) error {
-	return withinBuffOwnedSnapshot(ctx, base, characterID, accountID, apply, false)
-}
-
-func WithinBuffOwnedReadSnapshot(ctx context.Context, base Group, characterID, accountID string, apply func(Group) error) error {
-	return withinBuffOwnedSnapshot(ctx, base, characterID, accountID, apply, true)
-}
-
-func withinBuffOwnedSnapshot(ctx context.Context, base Group, characterID, accountID string, apply func(Group) error, readOnly bool) error {
 	characterID, accountID = strings.TrimSpace(characterID), strings.TrimSpace(accountID)
 	if characterID == "" || accountID == "" || apply == nil {
 		return ErrBuffOwnedSnapshotUnavailable
@@ -88,11 +73,7 @@ func withinBuffOwnedSnapshot(ctx context.Context, base Group, characterID, accou
 	if !ok {
 		return WithinBuffRegistration(ctx, base, characterID, accountID, apply)
 	}
-	within := u.WithinBuffOwnedSnapshot
-	if reader, ok := base.CeraShopAssets.(BuffOwnedReadSnapshotUnitOfWork); readOnly && ok {
-		within = reader.WithinBuffOwnedReadSnapshot
-	}
-	return within(ctx, accountID, characterID, "character:"+characterID+":buff_swap_native", func(c CharacterRepository, i InventoryRepository, e EquipmentRepository, s SettingsRepository, p BuffPetMetadataReader, l OwnedLegacyInventoryRepository) error {
+	return u.WithinBuffOwnedSnapshot(ctx, accountID, characterID, "character:"+characterID+":buff_swap_native", func(c CharacterRepository, i InventoryRepository, e EquipmentRepository, s SettingsRepository, p BuffPetMetadataReader, l OwnedLegacyInventoryRepository) error {
 		if c == nil || s == nil {
 			return ErrBuffOwnedSnapshotUnavailable
 		}
