@@ -118,10 +118,11 @@ func (s *Service) handleBuffSwapRegistration(session *gameSession, body []byte, 
 	}
 	s.logGameEvent(session, event, "char_id", session.selectedCharacterID, "skill", c.Skill, "equipment_slot", c.Slot, "source_list", c.List, "source_slot", c.Index, "wire_profile", wireProfile, "error", err)
 	if err == nil {
-		if group != nil {
-			return true, s.sendBuffSwapReapplyOwnedGroup(session, "registration_changed", false, false, true, group)
-		}
-		return true, s.sendBuffSwapReapplyForRegistration(session, "registration_changed")
+		// 登记已经提交到库；这里**不再重发 1368/1367 快照**。
+		// 原生客户端把 1368 视为"登记完成"，收到就会关闭选择装备的窗口，
+		// 导致每选一件装备窗口关一次（现场 2026-11-20）。客户端本次是乐观更新，
+		// 重开窗口、切场景或重登时由常规投影路径同步权威状态。
+		return true, nil
 	}
 	if group != nil {
 		// The paired native producer edits optimistically before sending.
