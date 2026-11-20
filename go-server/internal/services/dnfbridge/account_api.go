@@ -460,6 +460,9 @@ func (a *accountAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeAccountAPIError(w, http.StatusBadRequest, "请使用新版登录器登录")
 		return
 	}
+	if !a.admitClientAttestation(w, request, ip) {
+		return
+	}
 	if !a.allowRate(ip) {
 		writeAccountAPIError(w, http.StatusTooManyRequests, "尝试过于频繁，请稍后再试")
 		return
@@ -510,9 +513,6 @@ func (a *accountAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !a.admitClientAttestation(w, request, ip) {
-		return
-	}
 	if a.service.options.accountAPILoginToken {
 		a.handleLoginReplacement(ctx, w, request, accountID, storedHash, ip)
 		return
