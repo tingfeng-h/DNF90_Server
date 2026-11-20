@@ -75,6 +75,9 @@ type accountAPIServer struct {
 
 	rateMu   sync.Mutex
 	rateHits map[string][]time.Time
+
+	// attest 客户端文件指纹校验（允许清单 + 一次性挑战），见 client_attestation.go。
+	attest *clientAttestStore
 }
 
 type accountAPIRequest struct {
@@ -85,6 +88,13 @@ type accountAPIRequest struct {
 	Account                 string `json:"account"`
 	Password                string `json:"password"`
 	Device                  string `json:"device"`
+
+	// 客户端文件指纹（登录器提交；见 client_attestation.go）。
+	ClientExeSHA256 string `json:"clientExeSha256,omitempty"`
+	ClientPvfSHA256 string `json:"clientPvfSha256,omitempty"`
+	LauncherSHA256  string `json:"launcherSha256,omitempty"`
+	AttestNonce     string `json:"attestNonce,omitempty"`
+	AttestHmac      string `json:"attestHmac,omitempty"`
 }
 
 type accountAPIResponse struct {
@@ -99,8 +109,13 @@ type accountAPIResponse struct {
 	AccountID   string                   `json:"account_id,omitempty"`
 	// Token 是本次登录的启动器令牌：启动器把它写进 TCLS 启动串的 outer token
 	// 字段，客户端会原样转发，服务端据此精确认账号（见 account_login_token.go）。
-	Token   string `json:"token,omitempty"`
-	Message string `json:"message,omitempty"`
+	Token string `json:"token,omitempty"`
+
+	// 客户端指纹挑战（仅 /api/attest/challenge 返回）。
+	AttestNonce        string `json:"attestNonce,omitempty"`
+	AttestExpiresAt    int64  `json:"attestExpiresAt,omitempty"`
+	AttestHmacRequired bool   `json:"attestHmacRequired,omitempty"`
+	Message            string `json:"message,omitempty"`
 }
 
 // startAccountAPI 按配置启动公网账号 API；未配置监听地址时直接跳过。
@@ -157,7 +172,9 @@ func (s *Service) startAccountAPI(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
+	api.attest = newClientAttestStore()
 	mux.HandleFunc("/api/status", api.handleStatus)
+	mux.HandleFunc("/api/attest/challenge", api.handleAttestChallenge)
 	mux.HandleFunc("/api/diagnostics/context", api.handleLauncherDiagnostics)
 	mux.HandleFunc("/api/account/register", api.handleRegister)
 	mux.HandleFunc("/api/account/login", api.handleLogin)
@@ -493,6 +510,9 @@ func (a *accountAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !a.admitClientAttestation(w, request, ip) {
+		return
+	}
 	if a.service.options.accountAPILoginToken {
 		a.handleLoginReplacement(ctx, w, request, accountID, storedHash, ip)
 		return
@@ -583,4 +603,64 @@ func writeAccountAPIJSON(w http.ResponseWriter, status int, payload accountAPIRe
 
 func writeAccountAPIError(w http.ResponseWriter, status int, message string) {
 	writeAccountAPIJSON(w, status, accountAPIResponse{OK: false, Message: message})
+}
+
+// handleAttestChallenge 发放一次性登录挑战，供登录器签名。
+func (a *accountAPIServer) handleAttestChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeAccountAPIError(w, http.StatusMethodNotAllowed, "只支持 GET/POST")
+		return
+	}
+	ip := a.clientIP(r)
+	if !a.allowRate(ip) {
+		writeAccountAPIError(w, http.StatusTooManyRequests, "尝试过于频繁，请稍后再试")
+		return
+	}
+	nonce, expiresAt, hmacRequired, err := a.attest.challenge(ip)
+	if err != nil {
+		writeAccountAPIError(w, http.StatusInternalServerError, "挑战生成失败")
+		return
+	}
+	writeAccountAPIJSON(w, http.StatusOK, accountAPIResponse{
+		OK:                 true,
+		AttestNonce:        nonce,
+		AttestExpiresAt:    expiresAt.UnixMilli(),
+		AttestHmacRequired: hmacRequired,
+	})
+}
+
+// admitClientAttestation 按允许清单校验客户端指纹。
+// enforce 模式拒绝并说明原因；warn 模式只记录；off 或清单缺失时直接放行。
+func (a *accountAPIServer) admitClientAttestation(w http.ResponseWriter, request accountAPIRequest, ip string) bool {
+	if a == nil || a.attest == nil || a.service == nil {
+		return true
+	}
+	outcome := a.attest.verify(request, ip)
+	if outcome.ObserveOnly {
+		// 允许清单为空：记录完整指纹，管理员据此生成清单条目。
+		a.service.logInfo("dnfbridge client attestation observed",
+			"account", request.Account, "ip", ip,
+			"exe", strings.ToLower(strings.TrimSpace(request.ClientExeSHA256)),
+			"pvf", strings.ToLower(strings.TrimSpace(request.ClientPvfSHA256)),
+			"launcher", strings.ToLower(strings.TrimSpace(request.LauncherSHA256)))
+		return true
+	}
+	if outcome.Allow && outcome.Label == "" {
+		return true
+	}
+	if outcome.Allow {
+		a.service.logInfo("dnfbridge client attestation accepted",
+			"account", request.Account, "ip", ip, "mode", outcome.Mode, "version", outcome.Label)
+		return true
+	}
+	a.service.logWarn("dnfbridge client attestation rejected",
+		"account", request.Account, "ip", ip, "mode", outcome.Mode, "reason", outcome.Reason,
+		"exe", shortClientAttestHash(request.ClientExeSHA256),
+		"pvf", shortClientAttestHash(request.ClientPvfSHA256),
+		"launcher", shortClientAttestHash(request.LauncherSHA256))
+	if outcome.Mode == clientAttestModeEnforce {
+		writeAccountAPIError(w, http.StatusForbidden, "客户端版本不符，请使用官方登录器更新到最新版本后重试")
+		return false
+	}
+	return true
 }
