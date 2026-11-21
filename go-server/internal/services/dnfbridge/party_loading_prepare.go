@@ -10,7 +10,8 @@ type partyLoadingPreparation struct {
 	ready      bool
 	activation []func() error
 	after      []func() error
-	finishBody []byte
+	finishBody         []byte
+	characterSnapshots *partyLoadingCharacterSnapshotCache
 }
 
 func (p *partyLoadingPreparation) finishAfterActivation() error {

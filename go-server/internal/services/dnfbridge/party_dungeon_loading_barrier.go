@@ -158,7 +158,8 @@ type partyDungeonLoadingCycle struct {
 	// admissions coalesces work waiting for capacity or execution. Placement-only
 	// and finish-tail requests are separate phases: a timeout may place a member
 	// before that member has sent op37. Protected by partyDungeonLoadingMu.
-	admissions map[partyDungeonLoadingAdmissionKey]*partyDungeonLoadingAdmission
+	admissions         map[partyDungeonLoadingAdmissionKey]*partyDungeonLoadingAdmission
+	characterSnapshots *partyLoadingCharacterSnapshotCache
 }
 
 type partyDungeonLoadingAdmissionKey struct {
@@ -580,11 +581,19 @@ func (s *Service) releasePartyDungeonLoadingCycle(
 	for id, owner := range expected.owners {
 		owners[id] = owner
 	}
+	if expected.characterSnapshots == nil {
+		expected.characterSnapshots = newPartyLoadingCharacterSnapshotCache(len(members))
+	}
+	snapshots := expected.characterSnapshots
 	if expected.preparing == nil {
 		expected.preparing = make(map[uint16]*partyLoadingPreparation)
 		for _, id := range members {
 			if owner, ok := owners[id]; ok && owner.session != nil && owner.runtime != nil {
-				expected.preparing[id] = &partyLoadingPreparation{owner: owner, wantTail: releaseTail[id]}
+				expected.preparing[id] = &partyLoadingPreparation{
+					owner:              owner,
+					wantTail:           releaseTail[id],
+					characterSnapshots: snapshots,
+				}
 			}
 		}
 		expected.Timer = time.AfterFunc(partyDungeonLoadingBarrierTimeout, func() { s.checkPartyLoadingPreparation(partyID, expected, "prepare_watchdog") })
@@ -595,6 +604,8 @@ func (s *Service) releasePartyDungeonLoadingCycle(
 		}
 	}
 	s.partyDungeonLoadingMu.Unlock()
+	// 在工作线程并发预热全队角色+装备快照，避免 4 条事件循环同时阻塞于重复 MySQL 查询。
+	s.prewarmPartyLoadingCharacterSnapshots(snapshots, members, owners)
 	// Each member keeps its own session loop, bounded dispatch wait and the existing
 	// cycle/owner guard. Only the wait for the previous member is removed: the
 	// callbacks are submitted to their own loops at the same time instead of one
