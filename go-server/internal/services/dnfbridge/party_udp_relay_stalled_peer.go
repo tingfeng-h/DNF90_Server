@@ -51,8 +51,9 @@ func (r *currentPartyUDPRelay) watchStalledPartyMember(incoming, target *current
 	// The normal packet path does one small per-leg check. Scan the bounded
 	// topology only once a learned reverse leg has actually gone idle.
 	target.mu.Lock()
-	eligible := target.received > 0 && !target.lastReceivedAt.IsZero() &&
-		now.Sub(target.lastReceivedAt) >= timing.idle && !target.stallWatching &&
+	targetLastRecv := target.lastReceivedTimeLocked()
+	eligible := target.totalReceivedLocked() > 0 && !targetLastRecv.IsZero() &&
+		now.Sub(targetLastRecv) >= timing.idle && !target.stallWatching &&
 		!target.stallRecoveryUsed && !now.Before(target.stallRetryAfter)
 	target.mu.Unlock()
 	if !eligible {
@@ -69,10 +70,11 @@ func (r *currentPartyUDPRelay) watchStalledPartyMember(incoming, target *current
 			continue
 		}
 		leg.mu.Lock()
-		ok := leg.binding == target.binding && leg.received > 0 && leg.learnedEndpoint != nil &&
-			!leg.lastReceivedAt.IsZero() && now.Sub(leg.lastReceivedAt) >= timing.idle &&
+		legLastRecv := leg.lastReceivedTimeLocked()
+		count := leg.totalReceivedLocked()
+		ok := leg.binding == target.binding && count > 0 && leg.learnedEndpoint != nil &&
+			!legLastRecv.IsZero() && now.Sub(legLastRecv) >= timing.idle &&
 			!leg.stallWatching && !leg.stallRecoveryUsed && !now.Before(leg.stallRetryAfter)
-		count := leg.received
 		leg.mu.Unlock()
 		reverse := r.legs[currentPartyUDPRelayLegKey{partyID: key.partyID, ownerID: key.peerID, peerID: key.ownerID}]
 		if !ok || !r.pairCurrentLocked(leg, reverse) {
@@ -80,7 +82,7 @@ func (r *currentPartyUDPRelay) watchStalledPartyMember(incoming, target *current
 			return
 		}
 		reverse.mu.Lock()
-		active, reverseCount := now.Sub(reverse.lastReceivedAt) < timing.peerRecentWindow(), reverse.received
+		active, reverseCount := now.Sub(reverse.lastReceivedTimeLocked()) < timing.peerRecentWindow(), reverse.totalReceivedLocked()
 		reverse.mu.Unlock()
 		if !active {
 			r.mu.Unlock()
@@ -124,11 +126,11 @@ func (r *currentPartyUDPRelay) stalledMemberCurrent(legs []partyUDPRelayStalledL
 			return false
 		}
 		pair.leg.mu.Lock()
-		unchanged := pair.leg.received == pair.received
+		unchanged := pair.leg.totalReceivedLocked() == pair.received
 		pair.leg.mu.Unlock()
 		pair.reverse.mu.Lock()
-		active := time.Since(pair.reverse.lastReceivedAt) < timing.peerRecentWindow()
-		progress := pair.reverse.received >= pair.reverseReceived+32
+		active := time.Since(pair.reverse.lastReceivedTimeLocked()) < timing.peerRecentWindow()
+		progress := pair.reverse.totalReceivedLocked() >= pair.reverseReceived+32
 		pair.reverse.mu.Unlock()
 		if !unchanged || !active || (enoughTraffic && !progress) {
 			return false

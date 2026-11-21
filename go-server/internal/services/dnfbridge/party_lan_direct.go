@@ -175,8 +175,10 @@ func (s *Service) partyLANDirectPeerEndpoint(
 	if !partyLANUsableIPv4(inner) {
 		return [4]byte{}, 0, [4]byte{}, false
 	}
-	// 两端的自报 inner 必须**相等**（"同局域网"的第一半证据）。
-	if receiverRegistration := currentPartyPeerEndpointSnapshot(receiver); inner != receiverRegistration.InnerIPv4 {
+	// 两端的自报 inner 必须相等（同机多开）或同属 RFC1918 /24 局域网段（同局域网双机），
+	// 且下方必须同时满足服务端观测公网地址完全相等，防止跨家庭私网地址误配。
+	receiverRegistration := currentPartyPeerEndpointSnapshot(receiver)
+	if inner != receiverRegistration.InnerIPv4 && !partyLANSamePrivateSubnet24(inner, receiverRegistration.InnerIPv4) {
 		return [4]byte{}, 0, [4]byte{}, false
 	}
 	// 假阳性护栏：服务端**实际观测到**的两端 outer 地址也必须相等。

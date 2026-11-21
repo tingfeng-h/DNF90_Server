@@ -44,8 +44,14 @@ type currentPartyUDPRelayLeg struct {
 	conn        *net.UDPConn
 	port        uint16
 
-	mu              sync.Mutex
-	learnedEndpoint *net.UDPAddr
+	mu                   sync.Mutex
+	learnedEndpoint      *net.UDPAddr
+	fastTarget           atomic.Pointer[net.UDPAddr]
+	opposite             atomic.Pointer[currentPartyUDPRelayLeg]
+	retired              atomic.Bool
+	fastReceived         atomic.Uint64
+	fastLastRecvUnixNano atomic.Int64
+	lastMemoUnixSec      atomic.Int64
 	// forwarded/bytesForwarded 是"这条腿真的搬运过的数据报"。副本内队友位移走的是客户端
 	// P2P（服务端只在 op11 里公布中继端点），服务端**看不到任何位置包**；因此"队友不动"
 	// 这类症状只能靠这些计数判定"P2P 通道到底有没有流量、卡在哪一步"。
@@ -191,9 +197,11 @@ func (leg *currentPartyUDPRelayLeg) observeInboundEndpoint(
 
 	if firstLearn || portRebound {
 		leg.learnedEndpoint = cloneCurrentPartyUDPRelayAddr(source)
+		leg.fastTarget.Store(leg.learnedEndpoint)
 	}
 	if firstLearn || portRebound || leg.lastMemoRefreshAt.IsZero() || now.Sub(leg.lastMemoRefreshAt) >= time.Second {
 		leg.lastMemoRefreshAt = now
+		leg.lastMemoUnixSec.Store(now.Unix())
 		refreshMemo = true
 	}
 	return firstLearn, portRebound, refreshMemo
@@ -203,6 +211,9 @@ func (leg *currentPartyUDPRelayLeg) observeInboundEndpoint(
 func (leg *currentPartyUDPRelayLeg) deliveryTarget() *net.UDPAddr {
 	if leg == nil {
 		return nil
+	}
+	if target := leg.fastTarget.Load(); target != nil {
+		return target
 	}
 	leg.mu.Lock()
 	target := leg.learnedEndpoint
@@ -310,7 +321,7 @@ func (leg *currentPartyUDPRelayLeg) relayLegStatsSnapshot() relayLegStats {
 		PeerID:                leg.key.peerID,
 		ExpectedIPv4:          formatCurrentPartyUDPRelayIPv4(leg.binding.address),
 		AdvertisedPort:        leg.binding.advertisedPort,
-		Received:              leg.received,
+		Received:              leg.received + leg.fastReceived.Load(),
 		Forwarded:             leg.forwarded,
 		BytesForwarded:        leg.bytesForwarded,
 		EmptyPayload:          leg.emptyPayload,
@@ -410,6 +421,7 @@ type currentPartyUDPRelay struct {
 	pvpReleasedAt map[int]time.Time
 	legs          map[currentPartyUDPRelayLegKey]*currentPartyUDPRelayLeg
 	closed        bool
+	closedFlag    atomic.Bool
 	wg            sync.WaitGroup
 
 	// forwardedTotal 是全部腿（含已关闭的）累计转发的数据报数，原子累加，不参与转发逻辑。
@@ -736,9 +748,11 @@ func (r *currentPartyUDPRelay) syncGroup(pvp bool, partyID uint16, bindings []cu
 			}
 		}
 	}
+	r.retireLegsLocked(toClose)
 	for key, leg := range newLegs {
 		r.legs[key] = leg
 	}
+	r.linkOppositeLegsLocked(orderedLegKeys)
 	r.wg.Add(len(newLegs))
 	r.mu.Unlock()
 
@@ -761,6 +775,7 @@ func (r *currentPartyUDPRelay) CloseParty(partyID uint16) {
 	}
 	r.mu.Lock()
 	legs := r.removePartyLocked(partyID)
+	r.retireLegsLocked(legs)
 	r.mu.Unlock()
 	for _, leg := range legs {
 		_ = leg.conn.Close()
@@ -778,6 +793,7 @@ func (r *currentPartyUDPRelay) Close() error {
 		return nil
 	}
 	r.closed = true
+	r.closedFlag.Store(true)
 	if r.sweeperStop != nil {
 		close(r.sweeperStop)
 		r.sweeperStop = nil
@@ -792,6 +808,7 @@ func (r *currentPartyUDPRelay) Close() error {
 	for _, leg := range r.legs {
 		legs = append(legs, leg)
 	}
+	r.retireLegsLocked(legs)
 	r.legs = make(map[currentPartyUDPRelayLegKey]*currentPartyUDPRelayLeg)
 	r.usedPorts = make(map[int]struct{})
 	r.mu.Unlock()
@@ -881,6 +898,7 @@ func (r *currentPartyUDPRelay) newLegLockedPass(key currentPartyUDPRelayLegKey, 
 		if err != nil {
 			continue
 		}
+		configurePartyUDPRelaySocket(conn)
 		r.usedPorts[port] = struct{}{}
 		if r.portOwners == nil {
 			r.portOwners = make(map[int]currentPartyUDPRelayLegKey)
@@ -976,47 +994,72 @@ func (r *currentPartyUDPRelay) readLoop(leg *currentPartyUDPRelayLeg) {
 			r.traceRelayDatagram(leg, source, n, buffer[:n], "dropped_source_mismatch")
 			continue
 		}
-		r.mu.Lock()
-		if r.closed || r.legs[leg.key] != leg {
-			r.mu.Unlock()
+		if r.closedFlag.Load() || leg.retired.Load() {
 			return
 		}
-		firstLearn, portRebound, refreshMemo := leg.observeInboundEndpoint(source, time.Now())
-		if refreshMemo {
-			r.rememberEndpoint(leg, source)
-		}
-		r.mu.Unlock()
-		r.logStalledMemberTrafficResumed(leg)
-		if firstLearn || portRebound {
-			// 首次学习或网络波动导致 NAT 端口重映射：立即把待投队列补投到最新真实端点。
-			r.flushPendingProbes(leg)
-		}
-		r.logPendingProbeExpiry(leg)
-		if leg.noteLearnedEndpointAfterFallback() {
-			// 判定性证据：这条腿先前只被"自报端点回落"喂过包，现在它**自己**发来了数据报
-			// ⇒ 对端客户端被唤醒并回话了（响应式模型成立），且从这里开始 learnedEndpoint
-			// 就是权威目标，回落路径自动让位。
-			r.log("party UDP relay endpoint fallback learned real endpoint",
-				"party_id", leg.key.partyID,
-				"owner_id", leg.key.ownerID,
-				"peer_id", leg.key.peerID,
-				"leg_listen_port", leg.port,
-				"learned_endpoint", source.String(),
-				"meaning", "the_leg_that_was_only_fed_by_the_advertised_endpoint_guess_has_now_sent_its_own_datagram")
-		}
-
-		r.mu.Lock()
-		if r.closed || r.legs[leg.key] != leg {
+		var opposite *currentPartyUDPRelayLeg
+		if fastHit, refreshMemo := leg.observeInboundFastPath(source, time.Now().Unix()); fastHit {
+			if refreshMemo {
+				r.rememberEndpoint(leg, source)
+			}
+			r.logStalledMemberTrafficResumed(leg)
+			opposite = leg.opposite.Load()
+			if opposite == nil {
+				r.mu.Lock()
+				if r.closed || r.legs[leg.key] != leg {
+					r.mu.Unlock()
+					return
+				}
+				opposite = r.legs[currentPartyUDPRelayLegKey{
+					pvp:     leg.key.pvp,
+					partyID: leg.key.partyID,
+					ownerID: leg.key.peerID,
+					peerID:  leg.key.ownerID,
+				}]
+				if opposite != nil {
+					leg.opposite.Store(opposite)
+				}
+				r.mu.Unlock()
+			}
+		} else {
+			r.mu.Lock()
+			if r.closed || r.legs[leg.key] != leg {
+				r.mu.Unlock()
+				return
+			}
+			firstLearn, portRebound, refreshMemo := leg.observeInboundEndpoint(source, time.Now())
+			if refreshMemo {
+				r.rememberEndpoint(leg, source)
+			}
+			opposite = r.legs[currentPartyUDPRelayLegKey{
+				pvp:     leg.key.pvp,
+				partyID: leg.key.partyID,
+				ownerID: leg.key.peerID,
+				peerID:  leg.key.ownerID,
+			}]
+			if opposite != nil {
+				leg.opposite.Store(opposite)
+			}
 			r.mu.Unlock()
-			return
+			r.logStalledMemberTrafficResumed(leg)
+			if firstLearn || portRebound {
+				// 首次学习或网络波动导致 NAT 端口重映射：立即把待投队列补投到最新真实端点。
+				r.flushPendingProbes(leg)
+			}
+			r.logPendingProbeExpiry(leg)
+			if leg.noteLearnedEndpointAfterFallback() {
+				// 判定性证据：这条腿先前只被"自报端点回落"喂过包，现在它**自己**发来了数据报
+				// ⇒ 对端客户端被唤醒并回话了（响应式模型成立），且从这里开始 learnedEndpoint
+				// 就是权威目标，回落路径自动让位。
+				r.log("party UDP relay endpoint fallback learned real endpoint",
+					"party_id", leg.key.partyID,
+					"owner_id", leg.key.ownerID,
+					"peer_id", leg.key.peerID,
+					"leg_listen_port", leg.port,
+					"learned_endpoint", source.String(),
+					"meaning", "the_leg_that_was_only_fed_by_the_advertised_endpoint_guess_has_now_sent_its_own_datagram")
+			}
 		}
-		opposite := r.legs[currentPartyUDPRelayLegKey{
-			pvp:     leg.key.pvp,
-			partyID: leg.key.partyID,
-			ownerID: leg.key.peerID,
-			peerID:  leg.key.ownerID,
-		}]
-		r.mu.Unlock()
 		if opposite == nil {
 			if count, first := leg.noteDrop(relayLegDropMissingOppositeLeg); first {
 				r.logDrop(leg, relayLegDropMissingOppositeLeg, count, source,

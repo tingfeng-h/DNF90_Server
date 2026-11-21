@@ -960,6 +960,7 @@ func (s *Service) acceptLoop(ctx context.Context, listener net.Listener, handler
 			s.logWarn("dnfbridge accept failed", "addr", listener.Addr().String(), "error", err)
 			continue
 		}
+		configureGameTCPConn(conn)
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()

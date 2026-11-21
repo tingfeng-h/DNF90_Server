@@ -674,30 +674,7 @@ func (s *Service) handleOnlineRejoinRaid(session *gameSession, typ uint16, body 
 }
 
 func (s *Service) handleOnlineRaidManagerWork(session *gameSession, typ uint16, body []byte) error {
-	req, err := raid.DecodeManagerWorkRequest(body)
-	if err != nil {
-		s.logGameEvent(session, "game-raid-manager-body-invalid", "type", typ, "body_len", len(body), "error", err)
-		return nil
-	}
-	sourceID := selectedCharacterID(session)
-	state, ok, projectionChanged := s.moveRuntimeRaidMember(sourceID, uint16(req.MemberCharKey), byte(req.TargetGroup))
-	if !ok {
-		s.logGameEvent(session, "game-raid-manager-rejected",
-			"type", typ,
-			"source_char_id", sourceID,
-			"member_char_id", req.MemberCharKey,
-			"target_group", req.TargetGroup)
-		return nil
-	}
-	// S2C669 is DoNothing. Publish roster first, then only the changed
-	// live participation projection; no phase-start/reward side effects.
-	if err := s.broadcastRuntimeRaidRoster(state); err != nil {
-		return err
-	}
-	if projectionChanged {
-		s.queueCurrentRaidRosterProgress(state)
-	}
-	return nil
+	return s.dispatchOnlineRaidManagerWork(session, typ, body)
 }
 
 func (s *Service) handleOnlineRaidMemberChangeState(session *gameSession, typ uint16, body []byte) error {
