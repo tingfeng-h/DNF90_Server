@@ -134,7 +134,8 @@ func (s *Service) handleGameStreamInput(ctx context.Context, session *gameSessio
 					clearOp19QuietReadDeadline(conn)
 				}
 			}
-			if err := s.callGameSession(ctx, session, "game-stream-packet", func() error {
+			packetStarted := time.Now()
+			packetErr := s.callGameSession(ctx, session, "game-stream-packet", func() error {
 				if readAhead != nil && extractionCount >= 2 {
 					handled, err := s.handleNativeExtractionBatch(session, packets[index:index+extractionCount])
 					if handled {
@@ -160,8 +161,19 @@ func (s *Service) handleGameStreamInput(ctx context.Context, session *gameSessio
 				}
 				processed = span
 				return s.handleCurrentDungeonDeathBurstPackets(session, packets[index:index+span], readAhead != nil, packetsReadyAt)
-			}); err != nil {
-				s.logWarn("dnfbridge handle game packet failed", "remote", conn.RemoteAddr().String(), "error", err)
+			})
+			if elapsed := time.Since(packetStarted); elapsed > 200*time.Millisecond {
+				s.logWarn("game packet processing slow",
+					"conn_id", session.connID,
+					"char_id", session.selectedCharacterID,
+					"packet_kind", packets[index].Kind,
+					"packet_len", len(packets[index].Data),
+					"processed", processed,
+					"duration", elapsed,
+					"packets_in_batch", len(packets))
+			}
+			if packetErr != nil {
+				s.logWarn("dnfbridge handle game packet failed", "remote", conn.RemoteAddr().String(), "error", packetErr)
 				return
 			}
 			index += processed
