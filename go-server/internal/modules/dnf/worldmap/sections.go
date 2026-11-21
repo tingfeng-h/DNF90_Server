@@ -77,8 +77,12 @@ func rawSections(doc *dnfpvf.Document) ([]RawSection, []Diagnostic) {
 	if doc == nil {
 		return nil, []Diagnostic{{Message: "document is nil"}}
 	}
-	occurrences := make(map[string]int)
-	blocks := make(map[string]struct{})
+	estKeys := len(doc.Sections) / 4
+	if estKeys < 8 {
+		estKeys = 8
+	}
+	occurrences := make(map[string]int, estKeys)
+	blocks := make(map[string]struct{}, estKeys/2+1)
 	for _, section := range doc.Sections {
 		key := sectionKey(section.Name)
 		if isClosingSection(key) {
@@ -118,7 +122,9 @@ func rawSections(doc *dnfpvf.Document) ([]RawSection, []Diagnostic) {
 			out = append(out, raw)
 			continue
 		}
-		raw.Tokens = append([]dnfpvf.Token(nil), doc.Tokens[section.Start:section.End]...)
+		if section.End > section.Start {
+			raw.Tokens = doc.Tokens[section.Start:section.End:section.End]
+		}
 		out = append(out, raw)
 		if block && !isClosingSection(key) {
 			scope = append(scope, key)

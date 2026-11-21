@@ -299,7 +299,8 @@ type gameSession struct {
 	selectedUserInfoMode3Sent            bool
 	currentSceneObjectListSent           bool
 	selectedItemListRefreshSent          bool
-	selectedItemListBootstrapCharacterID uint16
+	selectedItemListBootstrapCharacterID  uint16
+	selectedInventoryMigrationsCharacterID uint16
 	selectedEquipmentUpdateSent          bool
 	selectedCreatureStateTableSent       bool
 	selectedRentalWalletStateSent        bool

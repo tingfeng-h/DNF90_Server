@@ -399,6 +399,8 @@ func (s *Service) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// 排查期：可选的本地 pprof 端点（默认关闭，仅监听回环地址）。
+	s.startDebugPprof()
 	if err := s.validateCurrentSceneActorRoute(); err != nil {
 		return err
 	}

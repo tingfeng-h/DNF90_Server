@@ -13,14 +13,39 @@ func Parse(docPath, text string) (*Document, error) {
 	if docPath == "" {
 		return nil, ErrPathRequired
 	}
-	parser := docParser{
-		doc: Document{Path: docPath},
+	estTokens := len(text) / 14
+	if estTokens < 16 {
+		estTokens = 16
 	}
-	lines := strings.Split(text, "\n")
-	for idx, line := range lines {
-		if err := parser.parseLine(idx+1, line); err != nil {
+	estSections := len(text) / 128
+	if estSections < 4 {
+		estSections = 4
+	}
+	parser := docParser{
+		doc: Document{
+			Path:     docPath,
+			Tokens:   make([]Token, 0, estTokens),
+			Sections: make([]Section, 0, estSections),
+		},
+	}
+	lineNo := 1
+	rest := text
+	for {
+		nl := strings.IndexByte(rest, '\n')
+		var line string
+		if nl < 0 {
+			line = rest
+		} else {
+			line = rest[:nl]
+		}
+		if err := parser.parseLine(lineNo, line); err != nil {
 			return nil, err
 		}
+		if nl < 0 {
+			break
+		}
+		rest = rest[nl+1:]
+		lineNo++
 	}
 	if parser.pending != nil {
 		return nil, fmt.Errorf("dnf pvf string at %d:%d is not closed", parser.pending.line, parser.pending.column)
@@ -127,8 +152,42 @@ func (p *docParser) scanValues(lineNo, baseColumn int, line string) error {
 }
 
 func (p *docParser) beginString(lineNo, column int, line string, start int) (Token, int, bool) {
-	pending := &pendingString{quote: line[start], line: lineNo, column: column}
-	pending.raw.WriteByte(line[start])
+	quote := line[start]
+	// 快路径：99% 以上 PVF 字符串在单行闭合且不含转义，直接切子串零分配返回，
+	// 避免每个字符串都堆分配 pendingString 与两份 strings.Builder。
+	if quote == '`' {
+		if relEnd := strings.IndexByte(line[start+1:], '`'); relEnd >= 0 {
+			end := start + 1 + relEnd
+			return Token{
+				Kind:   TokenString,
+				Raw:    line[start : end+1],
+				Value:  line[start+1 : end],
+				Line:   lineNo,
+				Column: column,
+			}, end + 1, true
+		}
+	} else {
+		hasEscape := false
+		for pos := start + 1; pos < len(line); pos++ {
+			ch := line[pos]
+			if ch == '\\' {
+				hasEscape = true
+				break
+			}
+			if ch == quote {
+				return Token{
+					Kind:   TokenString,
+					Raw:    line[start : pos+1],
+					Value:  line[start+1 : pos],
+					Line:   lineNo,
+					Column: column,
+				}, pos + 1, true
+			}
+		}
+		_ = hasEscape
+	}
+	pending := &pendingString{quote: quote, line: lineNo, column: column}
+	pending.raw.WriteByte(quote)
 	next, complete := appendStringSegment(pending, line, start+1)
 	if !complete {
 		p.pending = pending

@@ -67,7 +67,9 @@ func (s *Service) sendCurrentSelectInventoryBootstrapWithMainPreserved(session *
 			"依据", "本连接已成功发送当前角色主背包，体验窗口仍持有转职书对象")
 	}
 
-	if !preserveMain {
+	// 这四项属于登录期一次性存量迁移/清扫，同角色在同一连接内只需执行一次，
+	// 避免每次回城再进图都在放行事件循环里重复触发全量背包扫描与事务。
+	if !preserveMain && session.selectedInventoryMigrationsCharacterID != session.selectedCharacterID {
 
 		if err := s.migrateCurrentFateAccount(ctx, session); err != nil {
 			return err
@@ -129,6 +131,7 @@ func (s *Service) sendCurrentSelectInventoryBootstrapWithMainPreserved(session *
 				"asset_owner", "account_inventory_crystal_warehouse",
 				"env", cubeWarehouseRoutingEnv)
 		}
+		session.selectedInventoryMigrationsCharacterID = session.selectedCharacterID
 
 	}
 	// 7142的暖主背包继续由原生ACK/op14维护。首次登录已经执行迁移清扫；
