@@ -146,8 +146,8 @@ func (s *Service) startAccountAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open account API database: %w", err)
 	}
-	db.SetMaxOpenConns(8)
-	db.SetMaxIdleConns(2)
+	db.SetMaxOpenConns(32)
+	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()

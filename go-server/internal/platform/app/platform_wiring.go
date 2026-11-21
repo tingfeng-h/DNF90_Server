@@ -58,6 +58,9 @@ func newStorageObjSvc(cfg config.ServiceConfig, mux *http.ServeMux, wrapAdmin fu
 		if err != nil {
 			return nil, fmt.Errorf("open storage object mysql store: %w", err)
 		}
+		db.SetMaxOpenConns(64)
+		db.SetMaxIdleConns(16)
+		db.SetConnMaxLifetime(300 * time.Second)
 		sqlStore, err := storageobject.NewSQLStore(storageobject.SQLOptions{
 			DB:    db,
 			Table: cfg.StorageObject.MySQLTable,
@@ -110,8 +113,8 @@ func newAccountCenter(cfg config.ServiceConfig, mux *http.ServeMux, wrapAdmin fu
 		if err != nil {
 			return nil, fmt.Errorf("open account center mysql store: %w", err)
 		}
-		db.SetMaxOpenConns(16)
-		db.SetMaxIdleConns(4)
+		db.SetMaxOpenConns(64)
+		db.SetMaxIdleConns(16)
 		db.SetConnMaxLifetime(300 * time.Second)
 		sqlStore, err := accountcenter.NewSQLStore(accountcenter.SQLOptions{
 			DB:    db,

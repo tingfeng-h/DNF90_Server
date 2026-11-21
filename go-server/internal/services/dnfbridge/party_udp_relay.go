@@ -52,6 +52,11 @@ type currentPartyUDPRelayLeg struct {
 	fastReceived         atomic.Uint64
 	fastLastRecvUnixNano atomic.Int64
 	lastMemoUnixSec      atomic.Int64
+	fastForwarded        atomic.Uint64
+	fastBytesForwarded   atomic.Uint64
+	fastAnnounced        atomic.Bool
+	stallRecoveryPending atomic.Bool
+	lastStallCheckUnixMs atomic.Int64
 	// forwarded/bytesForwarded 是"这条腿真的搬运过的数据报"。副本内队友位移走的是客户端
 	// P2P（服务端只在 op11 里公布中继端点），服务端**看不到任何位置包**；因此"队友不动"
 	// 这类症状只能靠这些计数判定"P2P 通道到底有没有流量、卡在哪一步"。
@@ -322,8 +327,8 @@ func (leg *currentPartyUDPRelayLeg) relayLegStatsSnapshot() relayLegStats {
 		ExpectedIPv4:          formatCurrentPartyUDPRelayIPv4(leg.binding.address),
 		AdvertisedPort:        leg.binding.advertisedPort,
 		Received:              leg.received + leg.fastReceived.Load(),
-		Forwarded:             leg.forwarded,
-		BytesForwarded:        leg.bytesForwarded,
+		Forwarded:             leg.forwarded + leg.fastForwarded.Load(),
+		BytesForwarded:        leg.bytesForwarded + leg.fastBytesForwarded.Load(),
 		EmptyPayload:          leg.emptyPayload,
 		RejectedSource:        leg.rejectedSource,
 		MissingOppositeLeg:    leg.missingOppositeLeg,
@@ -378,13 +383,10 @@ func (leg *currentPartyUDPRelayLeg) noteForwarded(size int) (uint64, uint64, boo
 	if leg == nil {
 		return 0, 0, false
 	}
-	leg.mu.Lock()
-	defer leg.mu.Unlock()
-	leg.forwarded++
-	leg.bytesForwarded += uint64(size)
-	first := !leg.announced
-	leg.announced = true
-	return leg.forwarded, leg.bytesForwarded, first
+	forwarded := leg.fastForwarded.Add(1)
+	bytesForwarded := leg.fastBytesForwarded.Add(uint64(size))
+	first := leg.fastAnnounced.CompareAndSwap(false, true)
+	return forwarded, bytesForwarded, first
 }
 
 // ForwardedDatagrams 返回这条腿累计转发的数据报数与字节数。
@@ -394,7 +396,7 @@ func (leg *currentPartyUDPRelayLeg) ForwardedDatagrams() (uint64, uint64) {
 	}
 	leg.mu.Lock()
 	defer leg.mu.Unlock()
-	return leg.forwarded, leg.bytesForwarded
+	return leg.forwarded + leg.fastForwarded.Load(), leg.bytesForwarded + leg.fastBytesForwarded.Load()
 }
 
 // currentPartyUDPRelay is a per-directed-pair UDP relay. For party members A

@@ -24,30 +24,33 @@ func (s *Service) handleGameFrame(session *gameSession, frame []byte) error {
 			hasLoginRecord = true
 		}
 	}
+	packetLogOn := !s.packetLogDisabled.Load()
 	for _, record := range records {
-		runtimeName := runtimeCmdPacketName(record.GameHeader.Cmd, record.GameHeader.Type)
-		runtimeKnown := runtimeCmdPacketKnown(record.GameHeader.Cmd, record.GameHeader.Type)
-		logData := frame
-		if hasLoginRecord {
-			logData = record.Body
+		if packetLogOn {
+			runtimeName := runtimeCmdPacketName(record.GameHeader.Cmd, record.GameHeader.Type)
+			runtimeKnown := runtimeCmdPacketKnown(record.GameHeader.Cmd, record.GameHeader.Type)
+			logData := frame
+			if hasLoginRecord {
+				logData = record.Body
+			}
+			s.logGamePacket(session, "RECV", "game", logData,
+				"cmd", record.GameHeader.Cmd,
+				"type", record.GameHeader.Type,
+				"runtime_cmd_name", runtimeName,
+				"runtime_cmd_known", runtimeKnown,
+				"body_len", len(record.Body),
+				"frame_len", len(frame),
+				"record_scoped", hasLoginRecord)
+			s.logPacketEvent("game-transport-meta",
+				"conn_id", session.connID,
+				"channel_id", session.channel.ID,
+				"cmd", record.GameHeader.Cmd,
+				"type", record.GameHeader.Type,
+				"runtime_cmd_name", runtimeName,
+				"runtime_cmd_known", runtimeKnown,
+				"body_len", len(record.Body),
+				"frame_len", len(frame))
 		}
-		s.logGamePacket(session, "RECV", "game", logData,
-			"cmd", record.GameHeader.Cmd,
-			"type", record.GameHeader.Type,
-			"runtime_cmd_name", runtimeName,
-			"runtime_cmd_known", runtimeKnown,
-			"body_len", len(record.Body),
-			"frame_len", len(frame),
-			"record_scoped", hasLoginRecord)
-		s.logPacketEvent("game-transport-meta",
-			"conn_id", session.connID,
-			"channel_id", session.channel.ID,
-			"cmd", record.GameHeader.Cmd,
-			"type", record.GameHeader.Type,
-			"runtime_cmd_name", runtimeName,
-			"runtime_cmd_known", runtimeKnown,
-			"body_len", len(record.Body),
-			"frame_len", len(frame))
 		if err := s.handleGameCommand(session, record.GameHeader.Cmd, record.GameHeader.Type, record.Body); err != nil {
 			return err
 		}
@@ -165,35 +168,37 @@ func (s *Service) sendGameUpperFixed16Transport(session *gameSession, msgID uint
 	// 这里仍保留 header[7..10] 的历史 marker 日志字段，但真实触发客户端展开必须写 packet[15]。
 	packet[15] = byte(marker)
 	copy(packet[headerSize:], body)
-	runtimeName := upperRuntimeCmdPacketName(msgID, classification)
-	runtimeKnown := upperRuntimeCmdPacketKnown(msgID, classification)
-	s.logPacketEvent("game-upper-send-meta",
-		"conn_id", session.connID,
-		"channel_id", session.channel.ID,
-		"msg_id", msgID,
-		"runtime_cmd_name", runtimeName,
-		"runtime_cmd_known", runtimeKnown,
-		"classification", classification,
-		"sequence", 0,
-		"header_size", headerSize,
-		"header_marker", marker,
-		"plain_body_len", len(body),
-		"body_len", len(body),
-		"body_encoded", bodyEncoded,
-		"body_codec", bodyCodec,
-		"packet_len", len(packet))
-	s.logGamePacket(session, "SEND", "game-upper", packet,
-		"msg_id", msgID,
-		"runtime_cmd_name", runtimeName,
-		"runtime_cmd_known", runtimeKnown,
-		"classification", classification,
-		"header_seq", 0,
-		"header_size", headerSize,
-		"header_marker", marker,
-		"plain_body_len", len(body),
-		"body_len", len(body),
-		"body_encoded", bodyEncoded,
-		"body_codec", bodyCodec)
+	if !s.packetLogDisabled.Load() {
+		runtimeName := upperRuntimeCmdPacketName(msgID, classification)
+		runtimeKnown := upperRuntimeCmdPacketKnown(msgID, classification)
+		s.logPacketEvent("game-upper-send-meta",
+			"conn_id", session.connID,
+			"channel_id", session.channel.ID,
+			"msg_id", msgID,
+			"runtime_cmd_name", runtimeName,
+			"runtime_cmd_known", runtimeKnown,
+			"classification", classification,
+			"sequence", 0,
+			"header_size", headerSize,
+			"header_marker", marker,
+			"plain_body_len", len(body),
+			"body_len", len(body),
+			"body_encoded", bodyEncoded,
+			"body_codec", bodyCodec,
+			"packet_len", len(packet))
+		s.logGamePacket(session, "SEND", "game-upper", packet,
+			"msg_id", msgID,
+			"runtime_cmd_name", runtimeName,
+			"runtime_cmd_known", runtimeKnown,
+			"classification", classification,
+			"header_seq", 0,
+			"header_size", headerSize,
+			"header_marker", marker,
+			"plain_body_len", len(body),
+			"body_len", len(body),
+			"body_encoded", bodyEncoded,
+			"body_codec", bodyCodec)
+	}
 	return s.writeGameUpperPacket(session, packet)
 }
 

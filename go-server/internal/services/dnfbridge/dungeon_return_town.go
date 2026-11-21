@@ -846,13 +846,9 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 			source+"_resume_confirmed_return",
 		)
 	}
-	if (runtime.townReturnSource == currentRaidTableReturnSource || runtime.townReturnSource == currentRaidTablePartyReturnSource) && !s.currentRaidTableActiveReturnReady(session, runtime) {
+	if ok, reason := s.reconcileRaidTableReturnBeforeTownCommitLocked(session, runtime, source); !ok {
 		session.dungeon.mu.Unlock()
-		return fmt.Errorf("raid table return owner changed before town confirmation")
-	}
-	if runtime.raidTablePartyReturn != nil && !s.currentRaidTablePartyReturnMatches(session, runtime, runtime.raidTablePartyReturn) {
-		session.dungeon.mu.Unlock()
-		return fmt.Errorf("raid table party changed before town confirmation")
+		return fmt.Errorf("%s", reason)
 	}
 	snapshot := runtime.Session.Snapshot()
 	deadlineOwner := runtime.raidDeadlineReturn
@@ -1026,7 +1022,14 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 		session,
 		source+"_after_confirmed_typed_op24",
 	)
-	s.rebindTownCopresenceAfterDungeonReturn(session, townID, areaID, source+"_copresence_rebind")
+	if s.rebindTownCopresenceAfterDungeonReturn(session, townID, areaID, source+"_copresence_rebind") && err == nil {
+		if rebuildErr := s.rebuildRuntimePartyTownCoPresenceAfterReturn(session, source+"_after_copresence_rebind"); rebuildErr != nil {
+			s.logGameEvent(session, "game-party-town-return-post-rebind-deferred",
+				"char_id", session.selectedCharacterID,
+				"source", source,
+				"error", rebuildErr)
+		}
+	}
 	return err
 }
 

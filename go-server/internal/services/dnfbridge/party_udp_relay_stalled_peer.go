@@ -47,7 +47,13 @@ func (r *currentPartyUDPRelay) watchStalledPartyMember(incoming, target *current
 	if r.prepareStalledPeer == nil || incoming.key.pvp || target.key.pvp {
 		return
 	}
-	now, timing := time.Now(), r.stalledPeerTiming()
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	if prev := target.lastStallCheckUnixMs.Load(); prev > 0 && nowMs-prev < 500 {
+		return
+	}
+	target.lastStallCheckUnixMs.Store(nowMs)
+	timing := r.stalledPeerTiming()
 	// The normal packet path does one small per-leg check. Scan the bounded
 	// topology only once a learned reverse leg has actually gone idle.
 	target.mu.Lock()
@@ -185,6 +191,7 @@ func (r *currentPartyUDPRelay) confirmStalledPartyMember(stop <-chan struct{}, t
 				for _, pair := range legs {
 					pair.leg.mu.Lock()
 					pair.leg.stallRecoverySent = true
+					pair.leg.stallRecoveryPending.Store(true)
 					pair.leg.mu.Unlock()
 				}
 			}
@@ -198,7 +205,7 @@ func (r *currentPartyUDPRelay) confirmStalledPartyMember(stop <-chan struct{}, t
 }
 
 func (r *currentPartyUDPRelay) logStalledMemberTrafficResumed(leg *currentPartyUDPRelayLeg) {
-	if r.prepareStalledPeer == nil {
+	if r.prepareStalledPeer == nil || !leg.stallRecoveryPending.Load() {
 		return
 	}
 	leg.mu.Lock()
@@ -206,6 +213,7 @@ func (r *currentPartyUDPRelay) logStalledMemberTrafficResumed(leg *currentPartyU
 	if observed {
 		leg.stallRecoveryObserved = true
 	}
+	leg.stallRecoveryPending.Store(false)
 	leg.mu.Unlock()
 	if observed {
 		r.log("party UDP relay inbound observed after recovery request", "party_id", leg.key.partyID,

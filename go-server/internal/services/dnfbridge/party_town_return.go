@@ -1,7 +1,6 @@
 package dnfbridge
 
 import (
-	"fmt"
 
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 )
@@ -85,7 +84,9 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 					"receiver_char_id", receiver.selectedCharacterID,
 					"missing_peer", member.UserID,
 					"party_id", state.PartyID)
-				return fmt.Errorf("party return peer %d has no town actor", member.UserID)
+				// 同队最后落地的成员此时可能尚未执行到 rebindTownCopresenceAfterDungeonReturn，
+				// 暂缓待其登记进 onlinePlayers 后再完成重绑，绝不返回致命错误触发队友断线。
+				return nil
 			}
 			// 频道隔离（彻底隔离口径）：跨频道队友一律不投影（op23 没有频道字段，
 			// 发它等于把对方声明成本地区域的一员；同 sendTownRemotePartyActors）。

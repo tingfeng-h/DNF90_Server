@@ -138,13 +138,7 @@ func beginGameWriteBudgetLocked(p *gameSession, parent context.Context) (func(),
 // here under wireMu. A short write cannot reuse an advanced codec sequence.
 func (s *Service) writeGameSessionObserved(p *gameSession, data []byte, stage int) (int, error) {
 	if p.wireWriteContext == nil {
-		finish, err := beginGameWriteBudgetLocked(p, nil)
-		if err != nil {
-			s.logFirstGameTransportFailure(p, "budget_setup", stage, len(data), 0, 0, nil)
-			p.closeGameTransport()
-			return 0, err
-		}
-		defer finish()
+		return s.writeGameSessionFastObserved(p, data, stage)
 	}
 	ctx := p.wireWriteContext
 	if err := ctx.Err(); err != nil {
