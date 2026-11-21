@@ -50,7 +50,8 @@ func (s *mysqlBuffInventoryStore) Load(ctx context.Context, characterID string) 
 		return repository.InventoryRecord{}, false, err
 	}
 	record.UpdatedAt = scanTime(updatedAt)
-	return repository.CloneInventory(record), true, nil
+	// record 由本次 SQL 扫描全新构造，无任何外部共享引用，直接返回避免整包深拷贝。
+	return record, true, nil
 }
 
 func loadBuffLockedItemStackCollection(
@@ -87,7 +88,7 @@ func loadBuffLockedItemStackCollection(
 		stack.ExpireAt = scanTime(expireAt)
 		stack.RawEntry = append([]byte(nil), rawEntry...)
 		if values == nil {
-			values = make(map[string]repository.ItemStack)
+			values = make(map[string]repository.ItemStack, 32)
 		}
 		values[key] = stack
 	}
@@ -97,6 +98,9 @@ func loadBuffLockedItemStackCollection(
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
 	}
 
 	extraWhere := quoteSQLIdentifier(ownerColumn) + " = ?"

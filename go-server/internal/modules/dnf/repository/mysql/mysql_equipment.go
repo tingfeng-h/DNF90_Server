@@ -214,7 +214,7 @@ func loadEquipmentEntries(
 		entry.ExpireAt = scanTime(expireAt)
 		entry.RawEntry = append([]byte(nil), rawEntry...)
 		if entries == nil {
-			entries = make(map[string]repository.EquipmentEntry)
+			entries = make(map[string]repository.EquipmentEntry, 16)
 		}
 		entries[key] = entry
 	}
@@ -224,6 +224,9 @@ func loadEquipmentEntries(
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil
 	}
 	extras, err := router.db.QueryContext(ctx, router.selectQuery("SELECT entry_key, extra_key, extra_value FROM "+extraTable+" WHERE character_id = ? ORDER BY entry_key, extra_key"), characterID)
 	if err != nil {

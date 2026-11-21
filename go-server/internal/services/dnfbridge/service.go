@@ -165,6 +165,7 @@ type Service struct {
 	// 见 party_dungeon_loading_barrier.go。
 	partyDungeonLoadingMu     sync.Mutex
 	partyDungeonLoadingCycles map[uint16]*partyDungeonLoadingCycle
+	dungeonPeerActorCache     dungeonPeerActorSnapshotCache
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
 	// partyForceRuntime 是"强制组队"测试触发器的运行时状态（记忆已处理的命令内容）。

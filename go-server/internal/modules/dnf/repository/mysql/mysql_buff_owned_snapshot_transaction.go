@@ -78,10 +78,27 @@ func (u *mysqlCeraShopAssetUnitOfWork) withinBuffOwnedSnapshot(
 	}
 	// Writers lock Character then exact Settings before assets. Readers use a
 	// single consistent MVCC view, without acquiring those writer locks.
-	if _, _, err := settings.Load(ctx, settingsScope); err != nil {
+	settingsRecord, settingsFound, err := settings.Load(ctx, settingsScope)
+	if err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
-	if err := apply(characters, inventories, equipment, settings, petMetadata, legacy); err != nil {
+	var charRepo repository.CharacterRepository = characters
+	var settingsRepo repository.SettingsRepository = settings
+	if readOnly {
+		charRepo = &readOnlyCachedCharacterRepository{
+			CharacterRepository: characters,
+			key:                 characterID,
+			record:              character,
+			found:               found,
+		}
+		settingsRepo = &readOnlyCachedSettingsRepository{
+			SettingsRepository: settings,
+			key:                settingsScope,
+			record:             settingsRecord,
+			found:              settingsFound,
+		}
+	}
+	if err := apply(charRepo, inventories, equipment, settingsRepo, petMetadata, legacy); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
 	if err := ctx.Err(); err != nil {
