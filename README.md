@@ -55,6 +55,34 @@
 
 详细还原过程、客户端逆向依据与逐版回归记录见 [Docs/PARTY_MID_DUNGEON_LEAVE_FIX_20261118.md](Docs/PARTY_MID_DUNGEON_LEAVE_FIX_20261118.md)。
 
+## 本服组队战斗卡顿修复：队友 actor 延迟重投链（2026-11-22）
+
+> 4 人组队刷图时战斗中"一卡一卡"、单刷完全流畅。根因不在 CPU/GC/带宽/链路，
+> 而在队友 actor 的**延迟补投链**：客户端自 2026-11-15 起不再回应 `0x7f14 (ARQ1)`
+> 原生注册查询，导致每次投影都把 6 轮重投（750ms/1250ms/3s×4）跑满，
+> 客户端反复重建队友角色。
+
+### 修了什么
+
+| # | 问题 | 根因 | 修复 |
+| :-- | :--- | :--- | :--- |
+| 1 | 4 人组队战斗整屏"一卡一卡"，单刷/不组队流畅 | `scheduleDungeonPeerActorRecovery` 的 6 轮补投链永不停止（客户端不回应 ARQ1），每 1~3 秒重发一次完整 mode0/mode1/subtype0/op9 | 新增 `DNFBRIDGE_DUNGEON_PEER_RECOVERY` 开关，**默认关闭**补投链，只保留首次投影 |
+
+### 关键数据
+
+- 正常投递 50,576 次 vs **重投 37,754 次**（几乎 1:1）；最近 3000 行：14 send / 12 recovery。
+- 最后一次客户端 `native-registration` 确认：**2026-11-15T17:04:12Z**，之后再无记录。
+- 重投记录 `send_completed=true` 全成功、`client_native_result=unknown` 全未知。
+- CPU 档案：`armDungeonPeerActorRecovery` 占 20~38%，`sendDungeonPartyPeerActorStateObserved` 占 36~47%。
+- 同期排除：服务端 CPU 7~10%、GC 41 秒/次、无慢事件、socket 写仅 1 次 27ms、RTT 65~71ms、每客户端 0.4~1.0 Mbps。
+
+### 文件
+
+- `go-server/internal/services/dnfbridge/dungeon_peer_recovery_switch.go`（新增开关）
+- `go-server/internal/services/dnfbridge/dungeon_peer_actor_recovery.go`（入口短路）
+- 完整根因、证据与回滚方法见 [Docs/PARTY_PEER_ACTOR_RECOVERY_20261122.md](Docs/PARTY_PEER_ACTOR_RECOVERY_20261122.md)
+
+
 
 > [!IMPORTANT]
 > **先选对频道表，再启动服务。** 首次 `prepare` 必须显式传入 `--channel-info`，使用[完整的 120 频道外部 ETC](go-server/internal/services/dnfbridge/testdata/channel_info.etc)，并按[频道表部署说明](Docs/CHANNEL_TABLE_DEPLOYMENT.md)核对。PVF 内置表曾出现能解析、却无法完成登录的情况；更新 PVF 时保留已选外部表，部署后核对实际加载路径、摘要和频道目录。
