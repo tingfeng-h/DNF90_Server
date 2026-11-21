@@ -137,6 +137,8 @@ func beginGameWriteBudgetLocked(p *gameSession, parent context.Context) (func(),
 // All game TCP writes, including provider controls and batch flushes, pass
 // here under wireMu. A short write cannot reuse an advanced codec sequence.
 func (s *Service) writeGameSessionObserved(p *gameSession, data []byte, stage int) (int, error) {
+	writeProbeStarted := time.Now()
+	defer s.probeGameWriteDuration(p, stage, len(data), writeProbeStarted)
 	if p.wireWriteContext == nil {
 		return s.writeGameSessionFastObserved(p, data, stage)
 	}
