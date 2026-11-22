@@ -218,28 +218,36 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		// 护栏：观察方与该 target 已在同一支队伍时，不要再用 record(target, ch) 抢绑
 		// [localPlayer+0x4C8]（否则后续 record(self,ch) 因 oldUser==newUser 无法绑回）。
 		if s.shouldSkipTownCopresencePartyFrame(session, targetSession) {
-			s.logGameEvent(session, "game-peer-selection-party-state-deferred",
-				"source_char_id", sourceID,
-				"target_id", parsed.TargetID,
-				"reason", "viewer_and_target_share_the_same_runtime_party")
-			return nil
-		}
-		projected, projectionErr := s.sendCurrentPartyActorFrameProjection(
-			session,
-			targetSession,
-			targetParty,
-			"peer_selection_dynamic_target_party_state",
-		)
-		if projectionErr != nil {
-			return projectionErr
-		}
-		if !projected {
-			s.logGameEvent(session, "game-peer-selection-party-state-deferred",
+			if !samePartyTownSelectionNoticeEnabled() {
+				s.logGameEvent(session, "game-peer-selection-party-state-deferred",
+					"source_char_id", sourceID,
+					"target_id", parsed.TargetID,
+					"reason", "viewer_and_target_share_the_same_runtime_party")
+				return nil
+			}
+			s.logGameEvent(session, "game-peer-selection-party-frame-skipped",
 				"source_char_id", sourceID,
 				"target_id", parsed.TargetID,
 				"target_party_id", targetParty.PartyID,
-				"reason", "target_actor_projection_unavailable")
-			return nil
+				"reason", "viewer_and_target_share_the_same_runtime_party_keep_0x0007_notice")
+		} else {
+			projected, projectionErr := s.sendCurrentPartyActorFrameProjection(
+				session,
+				targetSession,
+				targetParty,
+				"peer_selection_dynamic_target_party_state",
+			)
+			if projectionErr != nil {
+				return projectionErr
+			}
+			if !projected {
+				s.logGameEvent(session, "game-peer-selection-party-state-deferred",
+					"source_char_id", sourceID,
+					"target_id", parsed.TargetID,
+					"target_party_id", targetParty.PartyID,
+					"reason", "target_actor_projection_unavailable")
+				return nil
+			}
 		}
 		targetPartyActive := targetParty.PartyID > 0 && len(runtimePartyMembers(targetParty)) > 0
 		selectionBody := party.BuildRequestPeerSelectionNotice(parsed.TargetID, parsed.Value0, targetPartyActive)
