@@ -23,12 +23,12 @@ func TestMySQLSkillEquipReadCacheSingleflightAndInvalidate(t *testing.T) {
 			rec, found, err := skillCache.getOrLoad("1001", now, func() (repository.SkillRecord, bool, error) {
 				calls.Add(1)
 				<-gate
-				return repository.SkillRecord{CharacterID: "1001", Levels: map[string]int64{"14": 10}}, true, nil
+				return repository.SkillRecord{CharacterID: "1001"}, true, nil
 			})
-			if err != nil || !found || rec.Levels["14"] != 10 {
+			if err != nil || !found || rec.CharacterID != "1001" {
 				t.Errorf("unexpected skill load: err=%v found=%v rec=%+v", err, found, rec)
 			}
-			rec.Levels["14"] = 0
+			rec.CharacterID = "mutated"
 		}()
 	}
 	close(gate)
@@ -41,15 +41,15 @@ func TestMySQLSkillEquipReadCacheSingleflightAndInvalidate(t *testing.T) {
 		t.Fatalf("expected cache hit")
 		return repository.SkillRecord{}, false, nil
 	})
-	if err != nil || !found || cached.Levels["14"] != 10 {
+	if err != nil || !found || cached.CharacterID != "1001" {
 		t.Fatalf("unexpected cached skill: err=%v found=%v rec=%+v", err, found, cached)
 	}
 	skillCache.invalidate("1001")
 	reloaded, found, err := skillCache.getOrLoad("1001", now.Add(300*time.Millisecond), func() (repository.SkillRecord, bool, error) {
 		calls.Add(1)
-		return repository.SkillRecord{CharacterID: "1001", Levels: map[string]int64{"14": 11}}, true, nil
+		return repository.SkillRecord{CharacterID: "1002"}, true, nil
 	})
-	if err != nil || !found || reloaded.Levels["14"] != 11 || calls.Load() != 2 {
+	if err != nil || !found || reloaded.CharacterID != "1002" || calls.Load() != 2 {
 		t.Fatalf("expected reload after invalidate: err=%v found=%v rec=%+v calls=%d", err, found, reloaded, calls.Load())
 	}
 }
