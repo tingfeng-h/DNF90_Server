@@ -166,7 +166,6 @@ type Service struct {
 	partyDungeonLoadingMu     sync.Mutex
 	partyDungeonLoadingCycles map[uint16]*partyDungeonLoadingCycle
 	dungeonPeerActorCache     dungeonPeerActorSnapshotCache
-	characterEnterCache       characterEnterShortCache
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
 	// partyForceRuntime 是"强制组队"测试触发器的运行时状态（记忆已处理的命令内容）。
