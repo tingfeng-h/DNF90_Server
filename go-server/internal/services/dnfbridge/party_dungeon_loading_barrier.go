@@ -700,7 +700,12 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 					"restore_ms", restoreMS, "placement_ms", placementMS, "prepare_tail_ms", prepareTailMS, "error", err)
 				return err
 			}
-			if totalMS := time.Since(releaseStarted).Milliseconds(); totalMS >= 100 {
+			totalMS := time.Since(releaseStarted).Milliseconds()
+			plan.prepareRestoreMS = restoreMS
+			plan.preparePlacementMS = placementMS
+			plan.prepareTailMS = prepareTailMS
+			plan.prepareTotalMS = totalMS
+			if totalMS >= 100 {
 				s.logGameEvent(session, "game-party-dungeon-loading-prepare-timing",
 					"party_id", partyID, "char_id", charID, "trigger", trigger,
 					"restore_ms", restoreMS, "placement_ms", placementMS,
@@ -750,6 +755,13 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 			"total_ms", time.Since(releaseStarted).Milliseconds(),
 			"packet_order", "op120-each-stable-slot-op3-all-op37-op30-op19-op14",
 			"reason", "vendor_releases_every_member_only_after_the_last_op37_arrived",
+		}
+		if plan != nil {
+			fields = append(fields,
+				"prepare_restore_ms", plan.prepareRestoreMS,
+				"prepare_placement_ms", plan.preparePlacementMS,
+				"prepare_tail_ms", plan.prepareTailMS,
+				"prepare_total_ms", plan.prepareTotalMS)
 		}
 		if err != nil {
 			fields = append(fields, "error", err)

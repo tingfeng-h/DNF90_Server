@@ -12,6 +12,10 @@ type partyLoadingPreparation struct {
 	after      []func() error
 	finishBody         []byte
 	characterSnapshots *partyLoadingCharacterSnapshotCache
+	prepareRestoreMS   int64
+	preparePlacementMS int64
+	prepareTailMS      int64
+	prepareTotalMS     int64
 }
 
 func (p *partyLoadingPreparation) finishAfterActivation() error {

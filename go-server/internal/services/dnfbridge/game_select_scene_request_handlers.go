@@ -1,6 +1,7 @@
 package dnfbridge
 
 import (
+	"time"
 	"longheng.io/server/internal/modules/dnf/dnfenum"
 	dnfproto "longheng.io/server/internal/modules/dnf/protocol"
 )
@@ -126,16 +127,31 @@ func (s *Service) sendFinishLoadingStatus(session *gameSession, request []byte) 
 //
 // source 语义与拆分前逐字一致：调用方传 `request37_after_upper_status`。
 func (s *Service) sendCurrentFinishLoadingReleaseTail(session *gameSession, source string) error {
+	t0 := time.Now()
 	if err := s.sendCurrentFinishLoadingCharacterState(session, source); err != nil {
 		return err
 	}
+	op37MS := time.Since(t0).Milliseconds()
+	t1 := time.Now()
 	if err := s.sendCurrentDayDungeonTownSchedule(session, source); err != nil {
 		return err
 	}
+	scheduleMS := time.Since(t1).Milliseconds()
+	t2 := time.Now()
 	if err := s.sendCompletedTutorialReentryExit(session, source+"_after_current_finish_loading_state"); err != nil {
 		return err
 	}
-	return s.startCurrentSuspiciousVillageElevator(session, source+"_after_current_finish_loading_state")
+	tutorialMS := time.Since(t2).Milliseconds()
+	t3 := time.Now()
+	err := s.startCurrentSuspiciousVillageElevator(session, source+"_after_current_finish_loading_state")
+	elevatorMS := time.Since(t3).Milliseconds()
+	if totalMS := time.Since(t0).Milliseconds(); totalMS >= 50 {
+		s.logGameEvent(session, "game-finish-loading-release-tail-timing",
+			"char_id", session.selectedCharacterID, "source", source,
+			"op37_state_ms", op37MS, "schedule_ms", scheduleMS,
+			"tutorial_ms", tutorialMS, "elevator_ms", elevatorMS, "total_ms", totalMS)
+	}
+	return err
 }
 
 func (s *Service) sendContentsPlayInfoState(session *gameSession, body []byte) error {
