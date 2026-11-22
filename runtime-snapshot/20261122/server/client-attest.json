@@ -1,0 +1,12 @@
+{
+  "mode": "off",
+  "versions": [
+    {
+      "label": "v211-cpp-20261120-x86",
+      "exe": "REDACTED_SHA256",
+      "pvf": "REDACTED_SHA256",
+      "launcher": "REDACTED_SHA256",
+      "note": "32 位登录器；多开钩子改为恢复后安装 + Toolhelp 兜底"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "listen": "127.0.0.1:18112",
+  "password": "CHANGE_ME",
+  "registrationDsn": "dnf:CHANGE_ME@tcp(10.0.0.3:3306)/dnf_local?parseTime=CHANGE_ME&charset=utf8mb4&loc=UTC",
+  "repositoryDsn": "dnf:CHANGE_ME@tcp(10.0.0.3:3306)/dnf_local?parseTime=CHANGE_ME&charset=utf8mb4&loc=UTC",
+  "accountTable": "dnf90_web_accounts",
+  "databases": [
+    "dnf_local"
+  ],
+  "tablePrefix": "dnf",
+  "pvfPath": "/assets/Script.pvf",
+  "pvfSha256": "29b66dc9274915cb1c2eabc6373dd9cf003557a7afc12e6d9bc9985cd92d5ae4",
+  "itemIndexPath": "/runtime/item-index.json",
+  "gameApi": "http://10.0.0.9:17002/api/game/admin",
+  "gameToken": "CHANGE_ME",
+  "scanSeconds": 30
+}
