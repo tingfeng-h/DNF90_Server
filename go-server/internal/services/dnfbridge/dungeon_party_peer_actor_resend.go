@@ -121,6 +121,9 @@ func (s *Service) resendDungeonPartyPeerActorsAfterFinishLoading(session *gameSe
 // finishing first must not consume the final resend while its peer is still
 // rebuilding; the late participant retries that receiver after both tails.
 func (s *Service) finishDungeonPartyPeerActorProjection(session *gameSession, source string) {
+	if currentDungeonPeerOp37ResendMode() == dungeonPeerOp37ResendOff {
+		return
+	}
 	if !peerSceneStableForPeerActorLandingResend(session) {
 		return
 	}

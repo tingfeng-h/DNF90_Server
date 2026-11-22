@@ -2,21 +2,18 @@ package dnfbridge
 
 import "testing"
 
-func TestNormalizeDungeonPeerActorResendKey(t *testing.T) {
-	roomA := dungeonPartyRunKey{PartyID: 1, DungeonID: 100, MazeIndex: 2, Seed: 42, RoomX: 0, RoomY: 0, MapID: 1001}
-	roomB := dungeonPartyRunKey{PartyID: 1, DungeonID: 100, MazeIndex: 2, Seed: 42, RoomX: 1, RoomY: 0, MapID: 1002}
-	nextRun := dungeonPartyRunKey{PartyID: 1, DungeonID: 100, MazeIndex: 2, Seed: 43, RoomX: 0, RoomY: 0, MapID: 1001}
-
-	t.Setenv(dungeonPeerRoomResendEnv, "")
-	if normalizeDungeonPeerActorResendKey(roomA) != normalizeDungeonPeerActorResendKey(roomB) {
-		t.Fatalf("same dungeon rooms should share resend dedupe key by default")
+func TestParseDungeonPeerOp37ResendMode(t *testing.T) {
+	for _, off := range []string{"", "off", "0", "false", "unknown"} {
+		if got := parseDungeonPeerOp37ResendMode(off); got != dungeonPeerOp37ResendOff {
+			t.Fatalf("mode(%q)=%v want off", off, got)
+		}
 	}
-	if normalizeDungeonPeerActorResendKey(roomA) == normalizeDungeonPeerActorResendKey(nextRun) {
-		t.Fatalf("different dungeon run seed must not share resend dedupe key")
+	if got := parseDungeonPeerOp37ResendMode("run"); got != dungeonPeerOp37ResendRun {
+		t.Fatalf("mode(run)=%v want run", got)
 	}
-
-	t.Setenv(dungeonPeerRoomResendEnv, "on")
-	if normalizeDungeonPeerActorResendKey(roomA) == normalizeDungeonPeerActorResendKey(roomB) {
-		t.Fatalf("legacy on mode must keep per-room resend key")
+	for _, room := range []string{"room", "on", "1", "true", "legacy"} {
+		if got := parseDungeonPeerOp37ResendMode(room); got != dungeonPeerOp37ResendRoom {
+			t.Fatalf("mode(%q)=%v want room", room, got)
+		}
 	}
 }

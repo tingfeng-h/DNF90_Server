@@ -5,32 +5,42 @@ import (
 	"strings"
 )
 
-// dungeonPeerRoomResendEnv 控制同一场地下城内“换房间 op37”是否重复补投队友全量 actor：
-//   - 默认（空 / off / 0 / false）：按整场地下城去重（归零 RoomX/RoomY/MapID，保留
-//     PartyID/RaidKey/RaidInstanceID/RaidRunID/DungeonID/MazeIndex/Seed）。
-//     首房进图仍完整执行一次补投，同图过门换房不再重复向客户端发全量 mode0/mode1/subtype0/op9；
-//   - on / 1 / true / legacy：恢复逐房间补投，便于随时 A/B 回退对比。
-const dungeonPeerRoomResendEnv = "DNFBRIDGE_DUNGEON_PEER_ROOM_RESEND"
+// dungeonPeerOp37ResendEnv 控制 op37 finish-loading 阶段是否执行队友 actor 补投
+// （finishDungeonPartyPeerActorProjection）：
+//   - 默认（空 / off / 0 / false）：彻底跳过 op37 补投，仅保留进图落位时的初次
+//     projectDungeonPartyPeerActors（TCP 可靠投递一次即可，消除首房 162~228ms 与换房重投）；
+//   - run：仅首房补投一次，同场副本换房跳过；
+//   - room / on / 1 / true / legacy：恢复原有逐房间补投，便于随时 A/B 回退对比。
+const dungeonPeerOp37ResendEnv = "DNFBRIDGE_DUNGEON_PEER_OP37_RESEND"
 
-func dungeonPeerRoomResendEnabled() bool {
-	return parseDungeonPeerRoomResendEnabled(os.Getenv(dungeonPeerRoomResendEnv))
+type dungeonPeerOp37ResendMode byte
+
+const (
+	dungeonPeerOp37ResendOff dungeonPeerOp37ResendMode = iota
+	dungeonPeerOp37ResendRun
+	dungeonPeerOp37ResendRoom
+)
+
+func currentDungeonPeerOp37ResendMode() dungeonPeerOp37ResendMode {
+	return parseDungeonPeerOp37ResendMode(os.Getenv(dungeonPeerOp37ResendEnv))
 }
 
-func parseDungeonPeerRoomResendEnabled(raw string) bool {
+func parseDungeonPeerOp37ResendMode(raw string) dungeonPeerOp37ResendMode {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "on", "1", "true", "yes", "legacy":
-		return true
+	case "run":
+		return dungeonPeerOp37ResendRun
+	case "room", "on", "1", "true", "yes", "legacy":
+		return dungeonPeerOp37ResendRoom
 	default:
-		return false
+		return dungeonPeerOp37ResendOff
 	}
 }
 
 func normalizeDungeonPeerActorResendKey(key dungeonPartyRunKey) dungeonPartyRunKey {
-	if dungeonPeerRoomResendEnabled() {
-		return key
+	if currentDungeonPeerOp37ResendMode() == dungeonPeerOp37ResendRun {
+		key.RoomX = 0
+		key.RoomY = 0
+		key.MapID = 0
 	}
-	key.RoomX = 0
-	key.RoomY = 0
-	key.MapID = 0
 	return key
 }
