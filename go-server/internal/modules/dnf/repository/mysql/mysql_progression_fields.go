@@ -96,6 +96,10 @@ func (s *mysqlSkillStore) LoadProgressionSkill(ctx context.Context, id string) (
 }
 
 func (s *mysqlCharStore) SaveProgressionCharacter(ctx context.Context, before, after repository.CharacterRecord) error {
+	if key, keyErr := repository.CharacterKey(after); keyErr == nil {
+		s.router.charReadCache.invalidate(key)
+		defer s.router.charReadCache.invalidate(key)
+	}
 	// This optional capability is used only by the progression transaction.
 	if !s.router.lockReads || before.CharacterID == "" || before.CharacterID != after.CharacterID || before.AccountID != after.AccountID {
 		return errors.New("progression delta requires the same locked character")

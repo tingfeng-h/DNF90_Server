@@ -263,6 +263,8 @@ type mysqlCharStore struct {
 
 func (s *mysqlCharStore) AdvanceStoryDigest(ctx context.Context, characterID string, level, migrationVersion uint32) error {
 	s.lockedReadCache = nil
+	s.router.charReadCache.invalidate(strings.TrimSpace(characterID))
+	defer s.router.charReadCache.invalidate(strings.TrimSpace(characterID))
 	characterID = strings.TrimSpace(characterID)
 	if characterID == "" {
 		return repository.ErrCharacterStoryDigestCharacterMissing
@@ -284,6 +286,15 @@ func (s *mysqlCharStore) Load(ctx context.Context, characterID string) (reposito
 	if ctx != nil && ctx.Err() != nil {
 		return repository.CharacterRecord{}, false, ctx.Err()
 	}
+	if s.router.canUseCharReadCache() && !s.trackStatChanges {
+		return s.router.charReadCache.getOrLoad(characterID, timeOrNow(time.Time{}, s.router.now), func() (repository.CharacterRecord, bool, error) {
+			return s.loadFromMySQL(ctx, characterID)
+		})
+	}
+	return s.loadFromMySQL(ctx, characterID)
+}
+
+func (s *mysqlCharStore) loadFromMySQL(ctx context.Context, characterID string) (repository.CharacterRecord, bool, error) {
 	version, reusable := s.lockedCharacterReadVersion()
 	if reusable {
 		if version != s.lockedReadVersion {
@@ -359,6 +370,8 @@ func (s *mysqlCharStore) CreateCharacter(ctx context.Context, record repository.
 	if err != nil {
 		return err
 	}
+	s.router.charReadCache.invalidate(characterID)
+	defer s.router.charReadCache.invalidate(characterID)
 	table, err := s.router.writeTable(mysqlCharTable, characterID)
 	if err != nil {
 		return err
@@ -407,6 +420,10 @@ func (s *mysqlCharStore) CreateCharacter(ctx context.Context, record repository.
 // 插入路径会补角色基础字段；更新路径只写 dirty 字段，避免整包覆盖。
 func (s *mysqlCharStore) SaveFields(ctx context.Context, record repository.CharacterRecord, fields ...repository.CharacterField) error {
 	s.lockedReadCache = nil
+	if key, keyErr := repository.CharacterKey(record); keyErr == nil {
+		s.router.charReadCache.invalidate(key)
+		defer s.router.charReadCache.invalidate(key)
+	}
 	var previous *repository.CharacterRecord
 	if s.trackStatChanges {
 		previous = s.loadedSnapshot
@@ -598,6 +615,8 @@ func (s *mysqlCharStore) SwapCharacterSlotsFromSnapshot(ctx context.Context, acc
 }
 
 func (s *mysqlCharStore) swapCharacterSlots(ctx context.Context, accountID string, slotA, slotB int, expectedA, expectedB string) error {
+	s.router.charReadCache.invalidateAll()
+	defer s.router.charReadCache.invalidateAll()
 	if err := ctxErr(ctx); err != nil {
 		return err
 	}

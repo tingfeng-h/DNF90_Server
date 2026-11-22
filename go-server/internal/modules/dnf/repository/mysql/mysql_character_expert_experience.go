@@ -8,6 +8,10 @@ import (
 
 // 经验是角色权威列；提取不需要逐条重写额外属性或其他权威列。
 func (s *mysqlCharStore) SaveExpertJobExperience(ctx context.Context, record repository.CharacterRecord) error {
+	if key, keyErr := repository.CharacterKey(record); keyErr == nil {
+		s.router.charReadCache.invalidate(key)
+		defer s.router.charReadCache.invalidate(key)
+	}
 	characterID, err := requireRecordKey(repository.CharacterKey, record, "character")
 	if err != nil {
 		return err
