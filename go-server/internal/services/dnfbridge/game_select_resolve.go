@@ -200,6 +200,12 @@ func (s *Service) characterForEnter(
 			return s.loadCharacterForEnterUncached(ctx, session, characterID)
 		})
 	}
+	if s != nil && session != nil && characterID != 0 && session.selectedCharacterID == characterID && session.characterGeneration != 0 {
+		key := characterEnterShortCacheKey{charID: characterID, generation: session.characterGeneration}
+		return s.characterEnterCache.getOrLoad(key, time.Now(), func() (uint16, string, dnfrepo.CharacterRecord, bool) {
+			return s.loadCharacterForEnterUncached(ctx, session, characterID)
+		})
+	}
 	return s.loadCharacterForEnterUncached(ctx, session, characterID)
 }
 
