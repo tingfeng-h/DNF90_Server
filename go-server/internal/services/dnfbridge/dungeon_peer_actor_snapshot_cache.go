@@ -7,7 +7,7 @@ import (
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
-const dungeonPeerActorSnapshotTTL = 5 * time.Second
+const dungeonPeerActorSnapshotTTL = 30 * time.Second
 
 type dungeonPeerActorSnapshotKey struct {
 	actorCharID uint16

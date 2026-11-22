@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"strconv"
+	"time"
 	"strings"
 
 	"longheng.io/server/internal/modules/dnf/buffswap"
@@ -226,25 +227,57 @@ func (s *Service) sendBuffSwapReapplyOwnedGroup(session *gameSession, source str
 		}
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), createWriteTimeout)
-	defer cancel()
-	characterID := strconv.Itoa(int(identity.character))
-	var projection buffswap.OwnedProjection
-	var err error
+	cacheKey := buffSwapReapplyCacheKey{
+		character:  identity.character,
+		generation: identity.generation,
+		hasGroup:   group != nil,
+	}
 	if group != nil {
-		projection, err = buffswap.LoadResolvedOwnedGroup(ctx, repos, characterID, identity.accountID, *group)
+		cacheKey.group = *group
+	}
+	now := time.Now()
+	var (
+		found   bool
+		state   buffswap.State
+		omitted int
+		err     error
+	)
+	if diagnostics {
+		// 登记/穿脱装备触发时立即失效换装缓存与队友投影缓存，保证 0ms 实时刷新。
+		s.invalidateBuffSwapReapplyCache(identity.character)
+		s.invalidateDungeonPeerActorSnapshot(identity.character)
+	}
+	if cached, hit := s.lookupBuffSwapReapplyCache(cacheKey, now); !diagnostics && hit {
+		found, state, omitted = cached.found, cached.state, cached.omitted
 	} else {
-		projection, err = buffswap.LoadResolvedOwnedMigratingCurrentInstances(ctx, repos, characterID, identity.accountID)
+		ctx, cancel := context.WithTimeout(context.Background(), createWriteTimeout)
+		defer cancel()
+		characterID := strconv.Itoa(int(identity.character))
+		var projection buffswap.OwnedProjection
+		if group != nil {
+			projection, err = buffswap.LoadResolvedOwnedGroup(ctx, repos, characterID, identity.accountID, *group)
+		} else {
+			projection, err = buffswap.LoadResolvedOwnedMigratingCurrentInstances(ctx, repos, characterID, identity.accountID)
+		}
+		if err == nil {
+			found = projection.Found
+			state = currentBuffOwnedWireState(projection)
+			omitted = projection.Omitted
+			s.storeBuffSwapReapplyCache(cacheKey, buffSwapReapplyCacheEntry{
+				found:   found,
+				state:   state,
+				omitted: omitted,
+			}, now)
+		}
 	}
 	if err == nil {
-		if skipUnregistered && !projection.Found {
+		if skipUnregistered && !found {
 			s.logGameEvent(session, "game-buff-swap-native-reapply-skipped", "source", source, "reason", "current_native_registration_absent")
 			if diagnostics {
-				s.logBuffSwapDiagnostic(session, "skipped", "registration_absent", source, identity, 0, nil, 0, projection.State, projection.Omitted)
+				s.logBuffSwapDiagnostic(session, "skipped", "registration_absent", source, identity, 0, nil, 0, state, omitted)
 			}
 			return nil
 		}
-		state, omitted := currentBuffOwnedWireState(projection), projection.Omitted
 		if !s.buffOwnedSendIdentityCurrent(identity) {
 			s.logGameEvent(session, "game-buff-swap-native-reapply-skipped", "source", source, "reason", "stale_owner_generation")
 			if diagnostics {
