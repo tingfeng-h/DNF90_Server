@@ -96,7 +96,7 @@ func (s *mysqlSkillStore) LoadProgressionSkill(ctx context.Context, id string) (
 }
 
 func (s *mysqlCharStore) SaveProgressionCharacter(ctx context.Context, before, after repository.CharacterRecord) error {
-	if key, keyErr := repository.CharacterKey(after); keyErr == nil {
+	if key := repository.CharacterKey(after); key != "" {
 		s.router.charReadCache.invalidate(key)
 		defer s.router.charReadCache.invalidate(key)
 	}

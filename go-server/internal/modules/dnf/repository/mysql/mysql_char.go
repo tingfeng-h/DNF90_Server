@@ -420,7 +420,7 @@ func (s *mysqlCharStore) CreateCharacter(ctx context.Context, record repository.
 // 插入路径会补角色基础字段；更新路径只写 dirty 字段，避免整包覆盖。
 func (s *mysqlCharStore) SaveFields(ctx context.Context, record repository.CharacterRecord, fields ...repository.CharacterField) error {
 	s.lockedReadCache = nil
-	if key, keyErr := repository.CharacterKey(record); keyErr == nil {
+	if key := repository.CharacterKey(record); key != "" {
 		s.router.charReadCache.invalidate(key)
 		defer s.router.charReadCache.invalidate(key)
 	}
