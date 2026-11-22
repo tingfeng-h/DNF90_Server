@@ -20,6 +20,18 @@ type mysqlEquipmentStore struct {
 
 // Load 按角色 ID 从 MySQL 读取穿戴装备记录。
 func (s *mysqlEquipmentStore) Load(ctx context.Context, characterID string) (repository.EquipmentRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.EquipmentRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && !s.trackEntryChanges && s.router.equipmentReadCache != nil {
+		return s.router.equipmentReadCache.getOrLoad(characterID, timeOrNow(time.Time{}, s.router.now), func() (repository.EquipmentRecord, bool, error) {
+			return s.loadFromMySQL(ctx, characterID)
+		})
+	}
+	return s.loadFromMySQL(ctx, characterID)
+}
+
+func (s *mysqlEquipmentStore) loadFromMySQL(ctx context.Context, characterID string) (repository.EquipmentRecord, bool, error) {
 	if s.trackEntryChanges {
 		s.loadedSnapshot = nil
 	}
@@ -73,6 +85,8 @@ func (s *mysqlEquipmentStore) SaveFields(ctx context.Context, record repository.
 	if err != nil {
 		return err
 	}
+	s.router.equipmentReadCache.invalidate(characterID)
+	defer s.router.equipmentReadCache.invalidate(characterID)
 	fields = repository.EquipmentFields.Normalize(fields)
 	if len(fields) == 0 {
 		return nil
@@ -126,6 +140,10 @@ func (s *mysqlEquipmentStore) SaveEquipmentEntryDelta(
 	record repository.EquipmentRecord,
 	keys []string,
 ) error {
+	if key := repository.EquipmentKey(record); key != "" {
+		s.router.equipmentReadCache.invalidate(key)
+		defer s.router.equipmentReadCache.invalidate(key)
+	}
 	if s.trackEntryChanges {
 		s.loadedSnapshot = nil
 	} // Partial deltas invalidate the preimage.

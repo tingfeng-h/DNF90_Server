@@ -17,6 +17,18 @@ type mysqlSkillStore struct {
 
 // Load 按角色 ID 从 MySQL 读取 DNF 技能记录。
 func (s *mysqlSkillStore) Load(ctx context.Context, characterID string) (repository.SkillRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.SkillRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && s.router.skillReadCache != nil {
+		return s.router.skillReadCache.getOrLoad(characterID, timeOrNow(time.Time{}, s.router.now), func() (repository.SkillRecord, bool, error) {
+			return s.loadFromMySQL(ctx, characterID)
+		})
+	}
+	return s.loadFromMySQL(ctx, characterID)
+}
+
+func (s *mysqlSkillStore) loadFromMySQL(ctx context.Context, characterID string) (repository.SkillRecord, bool, error) {
 	table, err := s.router.readTable(mysqlSkillTable, characterID)
 	if err != nil {
 		return repository.SkillRecord{}, false, err
@@ -81,6 +93,8 @@ func (s *mysqlSkillStore) SaveFields(ctx context.Context, record repository.Skil
 	if err != nil {
 		return err
 	}
+	s.router.skillReadCache.invalidate(characterID)
+	defer s.router.skillReadCache.invalidate(characterID)
 	fields = repository.SkillFields.Normalize(fields)
 	if len(fields) == 0 {
 		return nil

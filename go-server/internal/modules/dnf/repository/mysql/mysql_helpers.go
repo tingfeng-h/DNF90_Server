@@ -21,6 +21,8 @@ type mysqlRouter struct {
 	guildSnapshotNamespace *repository.GuildSnapshotNamespace
 	battlePassChanges      *repository.BattlePassChangeFeed
 	charReadCache          *mysqlCharReadCache
+	skillReadCache         *mysqlRecordReadCache[repository.SkillRecord]
+	equipmentReadCache     *mysqlRecordReadCache[repository.EquipmentRecord]
 	db                     SQLDB
 	readDBs                []string
 	writeDBs               []string
@@ -65,6 +67,8 @@ func newMySQLRouter(db SQLDB, options MySQLGroupOptions) (mysqlRouter, error) {
 		levelUpChanges:         &repository.LevelUpChangeFeed{},
 		battlePassChanges:      repository.NewBattlePassChangeFeed(),
 		charReadCache:          newMySQLCharReadCache(),
+		skillReadCache:         newMySQLRecordReadCache(repository.CloneSkill),
+		equipmentReadCache:     newMySQLRecordReadCache(repository.CloneEquipment),
 		db:                     db,
 		readDBs:                append([]string(nil), readDBs...),
 		writeDBs:               append([]string(nil), writeDBs...),
