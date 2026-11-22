@@ -23,6 +23,11 @@ func (r *currentPartyUDPRelay) writeCurrentPairDatagram(leg, opposite *currentPa
 	if r == nil || conn == nil || target == nil {
 		return 0, net.ErrClosed
 	}
+	if len(observed) == 0 || !observed[0] {
+		if n, err, handled := r.writeCurrentDedicatedLegFastPath(leg, opposite, conn, payload, target); handled {
+			return n, err
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.pairCurrentLocked(leg, opposite) {
@@ -35,6 +40,7 @@ func (r *currentPartyUDPRelay) writeCurrentPairDatagram(leg, opposite *currentPa
 	if err := conn.SetWriteDeadline(time.Now().Add(currentPartyRelayWriteTimeout)); err != nil {
 		return 0, err
 	}
+	defer func() { _ = conn.SetWriteDeadline(time.Time{}) }()
 	return conn.WriteToUDP(payload, target)
 }
 
@@ -66,5 +72,6 @@ func (r *currentPartyUDPRelay) writeCurrentLegDatagram(leg *currentPartyUDPRelay
 	if err := leg.conn.SetWriteDeadline(time.Now().Add(currentPartyRelayWriteTimeout)); err != nil {
 		return 0, err
 	}
+	defer func() { _ = leg.conn.SetWriteDeadline(time.Time{}) }()
 	return leg.conn.WriteToUDP(payload, target)
 }
