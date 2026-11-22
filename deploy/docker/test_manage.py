@@ -13,14 +13,14 @@ class DeploymentBoundaries(unittest.TestCase):
     def test_guild_solo_creation_requires_explicit_boolean(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(manage, "RUNTIME", Path(directory)):
             for value in [None, False, True]:
-                config = {"host_ip": "192.168.1.50", "server_ip": "10.253.90.2", "database_ip": "10.253.90.3", "subnet": "10.253.90.0/24", "database_password": "abc", "root_password": "def", "admin_token": "abc", "body_codec": "plaintext", "client_body_codec": "plaintext", "joust_event_enabled": True}
+                config = {"host_ip": "192.168.1.50", "server_ip": "10.0.0.2", "database_ip": "10.0.0.3", "subnet": "10.0.0.0/24", "database_password": "abc", "root_password": "def", "admin_token": "abc", "body_codec": "plaintext", "client_body_codec": "plaintext", "joust_event_enabled": True}
                 if value is not None:
                     config["guild_solo_create"] = value
                 manage.generate(config, {"ports": [10006]})
                 self.assertIn("DNFBRIDGE_GUILD_SOLO_CREATE=" + str(value is True).lower(), (Path(directory) / "server.env").read_text())
             for value in ["false", "true", 0, 1]:
                 with self.assertRaises(ValueError):
-                    manage.generate({"host_ip": "192.168.1.50", "server_ip": "10.253.90.2", "database_ip": "10.253.90.3", "subnet": "10.253.90.0/24", "database_password": "abc", "root_password": "def", "admin_token": "abc", "body_codec": "plaintext", "client_body_codec": "plaintext", "joust_event_enabled": True} | {"guild_solo_create": value}, {"ports": [10006]})
+                    manage.generate({"host_ip": "192.168.1.50", "server_ip": "10.0.0.2", "database_ip": "10.0.0.3", "subnet": "10.0.0.0/24", "database_password": "abc", "root_password": "def", "admin_token": "abc", "body_codec": "plaintext", "client_body_codec": "plaintext", "joust_event_enabled": True} | {"guild_solo_create": value}, {"ports": [10006]})
 
     def test_advertised_region_rejects_invalid_values_before_writing(self):
         for value in (-1, 250, True, "1", 1.5):
@@ -136,8 +136,8 @@ class DeploymentBoundaries(unittest.TestCase):
 
     def test_secrets_and_database_are_not_published(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(manage, "RUNTIME", Path(directory)):
-            config = {"host_ip": "192.168.1.50", "server_ip": "10.253.90.2", "database_ip": "10.253.90.3",
-                      "subnet": "10.253.90.0/24", "database_password": "DB_PRIVATE", "root_password": "ROOT_PRIVATE",
+            config = {"host_ip": "192.168.1.50", "server_ip": "10.0.0.2", "database_ip": "10.0.0.3",
+                      "subnet": "10.0.0.0/24", "database_password": "DB_PRIVATE", "root_password": "ROOT_PRIVATE",
                       "admin_token": "ADMIN_PRIVATE", "body_codec": "plaintext", "client_body_codec": "plaintext",
                       "joust_event_enabled": True}
             manage.generate(config, {"ports": [10011, 10019]})
@@ -158,7 +158,7 @@ class DeploymentBoundaries(unittest.TestCase):
             self.assertEqual(spec["volumes"], {"database": {}})
 
     def test_overlapping_network_fails_before_deployment(self):
-        config = {"subnet": "10.253.90.0/24", "server_ip": "10.253.90.2", "database_ip": "10.253.90.3"}
+        config = {"subnet": "10.0.0.0/24", "server_ip": "10.0.0.2", "database_ip": "10.0.0.3"}
         other = [{"Name": "other-project", "IPAM": {"Config": [{"Subnet": "10.253.0.0/16"}]}}]
         with patch.object(manage, "run", side_effect=["abc\n", json.dumps(other)]), self.assertRaisesRegex(ValueError, "overlaps"):
             manage.check_network(config)

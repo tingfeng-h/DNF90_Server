@@ -42,7 +42,7 @@ runtime-snapshot/20261114/
 | `<ADMIN_TOKEN>` | `server-configs/dnfbridge.toml`（`[admin] token`） |
 | `<GM_PASSWORD>` | `gm.json` |
 
-网络地址保留原值（`10.253.90.0/24` 容器内网、`10.0.4.9` 宿主机内网、`124.223.217.102` 公网），换机部署时改这三处。
+网络地址保留原值（`10.0.0.0/24` 容器内网、`10.0.4.9` 宿主机内网、`203.0.113.102` 公网），换机部署时改这三处。
 
 > `data/channel_info.etc` 在仓库 `.gitignore` 里被默认忽略（上游为避免提交机器相关的频道表），本快照用 `git add -f` 强制纳入；它只有 17 KB，`manifest.json` 里同时记录了它的 sha256 供校验。
 

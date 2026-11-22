@@ -1,8 +1,8 @@
 {
   "listen": "127.0.0.1:18112",
   "password": "<GM_PASSWORD>",
-  "registrationDsn": "dnf:<DB_PASSWORD>@tcp(10.253.90.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
-  "repositoryDsn": "dnf:<DB_PASSWORD>@tcp(10.253.90.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
+  "registrationDsn": "dnf:<DB_PASSWORD>@tcp(10.0.0.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
+  "repositoryDsn": "dnf:<DB_PASSWORD>@tcp(10.0.0.3:3306)/dnf_local?parseTime=true&charset=utf8mb4&loc=UTC",
   "accountTable": "dnf90_web_accounts",
   "databases": [
     "dnf_local"

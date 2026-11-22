@@ -11,8 +11,8 @@ BUFF_GROUP_SYNC_KEY = "DNFBRIDGE_BUFF_GROUP_SYNC"
 
 class BuffSwapReapplyConfiguration(unittest.TestCase):
     def local_config(self):
-        return {"host_ip": "192.168.1.50", "server_ip": "10.253.90.2",
-                "database_ip": "10.253.90.3", "subnet": "10.253.90.0/24",
+        return {"host_ip": "192.168.1.50", "server_ip": "10.0.0.2",
+                "database_ip": "10.0.0.3", "subnet": "10.0.0.0/24",
                 "database_password": "abc", "root_password": "def", "admin_token": "abc",
                 "body_codec": "plaintext", "client_body_codec": "plaintext",
                 "joust_event_enabled": True}

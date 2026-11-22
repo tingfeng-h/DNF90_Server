@@ -141,7 +141,7 @@ publish `instance.json`, `.env` files, packet logs or database dumps.
 
 Inside the dedicated bridge network, services listen on fixed private container
 IPs; the server advertises the host LAN address. The default subnet is
-`10.253.90.0/24`; preparation rejects overlap with other Docker networks.
+`10.0.0.0/24`; preparation rejects overlap with other Docker networks.
 The UDP relay is embedded and uses the same separate bind/advertise addresses.
 It does not use the upstream remote relay. Health checks bypass HTTP proxies.
 The image embeds Go timezone data and defaults to `Asia/Shanghai` for the

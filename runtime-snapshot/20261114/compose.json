@@ -9,13 +9,13 @@
         "database:/var/lib/mysql"
       ],
       "command": [
-        "--bind-address=10.253.90.3",
+        "--bind-address=10.0.0.3",
         "--character-set-server=utf8mb4",
         "--collation-server=utf8mb4_unicode_ci"
       ],
       "networks": {
         "private": {
-          "ipv4_address": "10.253.90.3"
+          "ipv4_address": "10.0.0.3"
         }
       },
       "logging": {
@@ -65,7 +65,7 @@
       },
       "networks": {
         "private": {
-          "ipv4_address": "10.253.90.2"
+          "ipv4_address": "10.0.0.2"
         }
       },
       "ports": [
@@ -203,7 +203,7 @@
           "-q",
           "-O",
           "/dev/null",
-          "http://10.253.90.2:17002/api/status"
+          "http://10.0.0.2:17002/api/status"
         ],
         "start_period": "180s",
         "interval": "10s",
@@ -218,7 +218,7 @@
       "ipam": {
         "config": [
           {
-            "subnet": "10.253.90.0/24"
+            "subnet": "10.0.0.0/24"
           }
         ]
       }

@@ -184,7 +184,7 @@ def prepare(args):
         config = {
             "profile": "docker-local-token-v1",
             "host_ip": private_ipv4(args.host_ip) if args.host_ip else detect_ip(),
-            "subnet": "10.253.90.0/24", "server_ip": "10.253.90.2", "database_ip": "10.253.90.3",
+            "subnet": "10.0.0.0/24", "server_ip": "10.0.0.2", "database_ip": "10.0.0.3",
             "database_password": secrets.token_hex(24), "root_password": secrets.token_hex(24),
             "admin_token": secrets.token_hex(32), "joust_event_enabled": True,
             "client_dir": str(Path(args.client_dir).resolve()) if args.client_dir else "",
