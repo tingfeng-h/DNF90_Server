@@ -13,7 +13,7 @@ import (
 
 // 单次会话事件最多连续消费 8 只怪物死亡，剩余击杀由外层读流循环继续接续处理，
 // 在保持 op39/op38 包序、升级边界与经验合并语义完全不变的前提下避免清房瞬间长时间阻塞事件循环与集中分配。
-const currentDungeonDeathBurstLimit = 8
+const currentDungeonDeathBurstLimit = 20
 
 // 与NPC已有读块收集共用拆包边界；坏帧或EOF交回原循环，先处理此前完整请求。
 func (s *Service) collectCurrentDungeonDeathReadyPackets(session *gameSession, ahead *nativeResultReadAhead,
