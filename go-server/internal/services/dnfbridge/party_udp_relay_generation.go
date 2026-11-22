@@ -23,11 +23,6 @@ func (r *currentPartyUDPRelay) writeCurrentPairDatagram(leg, opposite *currentPa
 	if r == nil || conn == nil || target == nil {
 		return 0, net.ErrClosed
 	}
-	if len(observed) == 0 || !observed[0] {
-		if n, err, handled := r.writeCurrentDedicatedLegFastPath(leg, opposite, conn, payload, target); handled {
-			return n, err
-		}
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.pairCurrentLocked(leg, opposite) {
