@@ -34,6 +34,18 @@ var _ repository.AccountCreateIfAbsentWriter = (*mysqlAccountStore)(nil)
 
 // Load 按账号 ID 从 MySQL 读取 DNF 账号记录。
 func (s *mysqlAccountStore) Load(ctx context.Context, accountID string) (repository.AccountRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.AccountRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && !s.trackMetadataChanges && s.router.accountReadCache != nil {
+		return s.router.accountReadCache.getOrLoad(accountID, timeOrNow(time.Time{}, s.router.now), func() (repository.AccountRecord, bool, error) {
+			return s.loadFromMySQL(ctx, accountID)
+		})
+	}
+	return s.loadFromMySQL(ctx, accountID)
+}
+
+func (s *mysqlAccountStore) loadFromMySQL(ctx context.Context, accountID string) (repository.AccountRecord, bool, error) {
 	if s.trackMetadataChanges {
 		s.loadedSnapshot = nil
 	}
@@ -84,6 +96,10 @@ func (s *mysqlAccountStore) Load(ctx context.Context, accountID string) (reposit
 
 // Save 保存完整 DNF 账号记录到 MySQL。
 func (s *mysqlAccountStore) Save(ctx context.Context, record repository.AccountRecord) error {
+	if key := repository.AccountKey(record); key != "" {
+		s.router.accountReadCache.invalidate(key)
+		defer s.router.accountReadCache.invalidate(key)
+	}
 	var previous *repository.AccountRecord
 	if s.trackMetadataChanges {
 		previous = s.loadedSnapshot
@@ -150,6 +166,8 @@ func (s *mysqlAccountStore) SaveRepresentAccountName(
 	accountID, name, metadataKey, metadataValue, newAccountState string,
 	updatedAt time.Time,
 ) error {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
 	accountID = strings.TrimSpace(accountID)
 	name = strings.TrimSpace(name)
 	metadataKey = strings.TrimSpace(metadataKey)
@@ -199,6 +217,8 @@ func (s *mysqlAccountStore) SaveMetadataEntry(
 	value string,
 	updatedAt time.Time,
 ) error {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
 	accountID = strings.TrimSpace(accountID)
 	key = strings.TrimSpace(key)
 	if accountID == "" {
@@ -253,6 +273,8 @@ func (s *mysqlAccountStore) AddAccountEpicPieceBalance(
 	amount uint32,
 	updatedAt time.Time,
 ) (uint32, error) {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return 0, db.ErrRecordKeyRequired
@@ -321,6 +343,8 @@ func (s *mysqlAccountStore) AdvanceStoryDigestViewedLevel(
 	accountID string,
 	level uint32,
 ) error {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return db.ErrRecordKeyRequired

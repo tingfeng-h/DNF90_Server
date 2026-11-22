@@ -10,6 +10,10 @@ import (
 )
 
 func (s *mysqlAccountStore) UpdateMetadataPair(ctx context.Context, left, right string, apply func(repository.AccountRecord, repository.AccountRecord) (map[string]string, map[string]string, error), at time.Time) error {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(left))
+	s.router.accountReadCache.invalidate(strings.TrimSpace(right))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(left))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(right))
 	if ctx == nil {
 		ctx = context.Background()
 	}

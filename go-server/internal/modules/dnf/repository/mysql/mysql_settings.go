@@ -4,6 +4,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"time"
 	"longheng.io/server/internal/modules/dnf/repository"
 )
 
@@ -15,6 +16,18 @@ type mysqlSettingsStore struct {
 
 // Load 按 scope 从 MySQL 读取 DNF 设置记录。
 func (s *mysqlSettingsStore) Load(ctx context.Context, scope string) (repository.SettingsRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.SettingsRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && s.router.settingsReadCache != nil {
+		return s.router.settingsReadCache.getOrLoad(scope, timeOrNow(time.Time{}, s.router.now), func() (repository.SettingsRecord, bool, error) {
+			return s.loadFromMySQL(ctx, scope)
+		})
+	}
+	return s.loadFromMySQL(ctx, scope)
+}
+
+func (s *mysqlSettingsStore) loadFromMySQL(ctx context.Context, scope string) (repository.SettingsRecord, bool, error) {
 	table, err := s.router.readTable(mysqlSettingsTable, scope)
 	if err != nil {
 		return repository.SettingsRecord{}, false, err
@@ -55,6 +68,10 @@ func (s *mysqlSettingsStore) Save(ctx context.Context, record repository.Setting
 // SaveFields 保存 DNF 设置指定字段到 MySQL。
 // 当前只有 Values 字段，保留字段化接口是为了和其他玩家仓储统一。
 func (s *mysqlSettingsStore) SaveFields(ctx context.Context, record repository.SettingsRecord, fields ...repository.SettingsField) error {
+	if scope := repository.SettingsKey(record); scope != "" {
+		s.router.settingsReadCache.invalidate(scope)
+		defer s.router.settingsReadCache.invalidate(scope)
+	}
 	scope, err := requireRecordKey(repository.SettingsKey, record, "settings")
 	if err != nil {
 		return err

@@ -25,6 +25,8 @@ type mysqlRouter struct {
 	equipmentReadCache     *mysqlRecordReadCache[repository.EquipmentRecord]
 	inventoryReadCache     *mysqlRecordReadCache[repository.InventoryRecord]
 	questReadCache         *mysqlRecordReadCache[repository.QuestRecord]
+	accountReadCache       *mysqlRecordReadCache[repository.AccountRecord]
+	settingsReadCache      *mysqlRecordReadCache[repository.SettingsRecord]
 	db                     SQLDB
 	readDBs                []string
 	writeDBs               []string
@@ -73,6 +75,8 @@ func newMySQLRouter(db SQLDB, options MySQLGroupOptions) (mysqlRouter, error) {
 		equipmentReadCache:     newMySQLRecordReadCache(repository.CloneEquipment),
 		inventoryReadCache:     newMySQLRecordReadCache(repository.CloneInventory),
 		questReadCache:         newMySQLRecordReadCache(repository.CloneQuest),
+		accountReadCache:       newMySQLRecordReadCache(repository.CloneAccount),
+		settingsReadCache:      newMySQLRecordReadCache(repository.CloneSettings),
 		db:                     db,
 		readDBs:                append([]string(nil), readDBs...),
 		writeDBs:               append([]string(nil), writeDBs...),

@@ -10,6 +10,8 @@ import (
 )
 
 func (s *mysqlAccountStore) SaveMetadataEntryWithPrefixLimit(ctx context.Context, accountID, prefix, key, activeValue string, limit int, updatedAt time.Time) error {
+	s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
+	defer s.router.accountReadCache.invalidate(strings.TrimSpace(accountID))
 	if _, ok := s.router.db.(sqlTxBeginner); !ok {
 		return repository.ErrAccountMetadataUnavailable
 	}

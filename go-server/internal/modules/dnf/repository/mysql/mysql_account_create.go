@@ -12,6 +12,10 @@ import (
 // 普通INSERT的主键竞争保证首次创建者唯一；元数据与账号行同事务发布。
 // 不能用upsert或INSERT IGNORE：前者覆盖旧记录，后者会吞掉非主键错误。
 func (s *mysqlAccountStore) CreateIfAbsent(ctx context.Context, record repository.AccountRecord) (bool, error) {
+	if key := repository.AccountKey(record); key != "" {
+		s.router.accountReadCache.invalidate(key)
+		defer s.router.accountReadCache.invalidate(key)
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
