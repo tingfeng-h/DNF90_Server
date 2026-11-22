@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"time"
 	"longheng.io/server/internal/modules/dnf/repository"
 	"sort"
 )
@@ -14,6 +15,18 @@ type mysqlQuestStore struct {
 }
 
 func (s *mysqlQuestStore) Load(ctx context.Context, characterID string) (repository.QuestRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.QuestRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && s.router.questReadCache != nil {
+		return s.router.questReadCache.getOrLoad(characterID, timeOrNow(time.Time{}, s.router.now), func() (repository.QuestRecord, bool, error) {
+			return s.loadFromMySQL(ctx, characterID)
+		})
+	}
+	return s.loadFromMySQL(ctx, characterID)
+}
+
+func (s *mysqlQuestStore) loadFromMySQL(ctx context.Context, characterID string) (repository.QuestRecord, bool, error) {
 	table, err := s.router.readTable(mysqlQuestTable, characterID)
 	if err != nil {
 		return repository.QuestRecord{}, false, err
@@ -62,6 +75,8 @@ func (s *mysqlQuestStore) SaveFields(ctx context.Context, record repository.Ques
 	if err != nil {
 		return err
 	}
+	s.router.questReadCache.invalidate(characterID)
+	defer s.router.questReadCache.invalidate(characterID)
 	fields = repository.QuestFields.Normalize(fields)
 	if len(fields) == 0 {
 		return nil

@@ -20,6 +20,18 @@ type mysqlBagStore struct {
 
 // Load 按角色 ID 从 MySQL 读取 DNF 背包记录。
 func (s *mysqlBagStore) Load(ctx context.Context, characterID string) (repository.InventoryRecord, bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return repository.InventoryRecord{}, false, ctx.Err()
+	}
+	if s.router.canUseCharReadCache() && !s.trackSlotChanges && s.router.inventoryReadCache != nil {
+		return s.router.inventoryReadCache.getOrLoad(characterID, timeOrNow(time.Time{}, s.router.now), func() (repository.InventoryRecord, bool, error) {
+			return s.loadFromMySQL(ctx, characterID)
+		})
+	}
+	return s.loadFromMySQL(ctx, characterID)
+}
+
+func (s *mysqlBagStore) loadFromMySQL(ctx context.Context, characterID string) (repository.InventoryRecord, bool, error) {
 	table, err := s.router.readTable(mysqlBagTable, characterID)
 	if err != nil {
 		return repository.InventoryRecord{}, false, err
@@ -75,6 +87,8 @@ func (s *mysqlBagStore) SaveFields(ctx context.Context, record repository.Invent
 	if err != nil {
 		return err
 	}
+	s.router.inventoryReadCache.invalidate(characterID)
+	defer s.router.inventoryReadCache.invalidate(characterID)
 	fields = repository.InventoryFields.Normalize(fields)
 	if len(fields) == 0 {
 		return nil
@@ -135,6 +149,8 @@ func (s *mysqlBagStore) SaveItemStackSlotDelta(
 	if err != nil {
 		return err
 	}
+	s.router.inventoryReadCache.invalidate(characterID)
+	defer s.router.inventoryReadCache.invalidate(characterID)
 	field, values, err := inventoryCollectionValues(record, collection)
 	if err != nil {
 		return err

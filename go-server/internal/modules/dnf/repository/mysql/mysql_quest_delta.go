@@ -125,6 +125,8 @@ func (s *mysqlQuestStore) SaveQuestChanges(ctx context.Context, before, after re
 	if err != nil {
 		return err
 	}
+	s.router.questReadCache.invalidate(id)
+	defer s.router.questReadCache.invalidate(id)
 	if repository.QuestKey(before) != id {
 		return repository.ErrQuestVersionConflict
 	}
