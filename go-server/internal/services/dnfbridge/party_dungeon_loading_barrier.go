@@ -670,6 +670,7 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 		if retiredPlan {
 			return nil
 		}
+		releaseStarted := time.Now()
 		if plan != nil && phase == 0 {
 			s.partyDungeonLoadingMu.Lock()
 			prepared := plan.ready || expected.activationScheduled
@@ -680,21 +681,35 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 			}
 			session.partyLoadingPrepared = plan
 			defer func() { session.partyLoadingPrepared = nil }()
+			t0 := time.Now()
 			err := s.restoreCurrentRaidSessionProjection(session, "shared_loading_prepare")
+			restoreMS := time.Since(t0).Milliseconds()
+			t1 := time.Now()
 			if err == nil {
 				err = s.sendPendingPostStartMapPlayerPlacement(session, "party_dungeon_shared_loading_barrier")
 			}
+			placementMS := time.Since(t1).Milliseconds()
+			t2 := time.Now()
 			if err == nil && prepareTail {
 				plan.finishBody, err = s.prepareCurrentFinishLoadingCharacterStateSnapshot(session, "shared_loading_prepare")
 			}
+			prepareTailMS := time.Since(t2).Milliseconds()
 			if err != nil {
 				session.partyLoadingPrepared = nil
-				s.logGameEvent(session, "game-party-loading-prepare-failed", "char_id", charID, "error", err)
+				s.logGameEvent(session, "game-party-loading-prepare-failed", "char_id", charID,
+					"restore_ms", restoreMS, "placement_ms", placementMS, "prepare_tail_ms", prepareTailMS, "error", err)
 				return err
+			}
+			if totalMS := time.Since(releaseStarted).Milliseconds(); totalMS >= 100 {
+				s.logGameEvent(session, "game-party-dungeon-loading-prepare-timing",
+					"party_id", partyID, "char_id", charID, "trigger", trigger,
+					"restore_ms", restoreMS, "placement_ms", placementMS,
+					"prepare_tail_ms", prepareTailMS, "total_ms", totalMS)
 			}
 			s.markPartyLoadingPrepared(partyID, expected, charID, plan, trigger)
 			return nil
 		}
+		tAct := time.Now()
 		if plan != nil {
 			session.partyLoadingPrepared = plan
 			defer func() { session.partyLoadingPrepared = nil }()
@@ -706,10 +721,15 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 				}
 			}
 		}
+		activationMS := time.Since(tAct).Milliseconds()
+		tPlace := time.Now()
 		err := s.sendPendingPostStartMapPlayerPlacement(session, "party_dungeon_shared_loading_barrier")
+		placementMS := time.Since(tPlace).Milliseconds()
+		tTail := time.Now()
 		if err == nil && wantTail {
 			err = s.sendCurrentFinishLoadingReleaseTail(session, "request37_after_upper_status")
 		}
+		tailMS := time.Since(tTail).Milliseconds()
 		slot := byte(0)
 		if index, indexed := runtimePartyMemberIndex(charID, s.runtimePartyStateForSession(session)); indexed {
 			slot = index
@@ -724,6 +744,10 @@ func (s *Service) releasePartyDungeonLoadingMemberPhase(partyID uint16, expected
 			"local_slot", slot,
 			"trigger", trigger,
 			"release_tail", wantTail,
+			"activation_ms", activationMS,
+			"placement_ms", placementMS,
+			"tail_ms", tailMS,
+			"total_ms", time.Since(releaseStarted).Milliseconds(),
 			"packet_order", "op120-each-stable-slot-op3-all-op37-op30-op19-op14",
 			"reason", "vendor_releases_every_member_only_after_the_last_op37_arrived",
 		}
