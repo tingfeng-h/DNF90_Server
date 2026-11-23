@@ -1072,7 +1072,8 @@ func (s *Service) sendTownRemotePartyActors(receiver *gameSession, state aligned
 		if actor.ChannelID != receiverChannelID {
 			continue
 		}
-		if s.townPrivateRoomPeerProjectionBlocked(receiver, actor) {
+		blockPrivateRoom, skipPrivateRoomOp23 := s.townPrivateRoomPeerProjectionPolicy(receiver, actor)
+		if blockPrivateRoom {
 			continue
 		}
 		// A party actor fallback must not recreate another raid's actor inside
@@ -1092,6 +1093,9 @@ func (s *Service) sendTownRemotePartyActors(receiver *gameSession, state aligned
 		}
 		if err := s.sendTownRemoteActorState(receiver, actor, "town_remote_party_actor_after_set_user_area"); err != nil {
 			return err
+		}
+		if skipPrivateRoomOp23 {
+			continue
 		}
 		areaBody := buildCurrentTownUserAreaNotificationBody(
 			currentSceneActorObjectKey(actor.CharacterID),

@@ -91,3 +91,20 @@ func TestPartySameChannelCrossRoomInviteAllowsAndPrimesMode8(t *testing.T) {
 	_ = context.Background()
 	_ = party.RequestPeerRequest{}
 }
+
+func TestPartyCrossRoomTownProjectionSwitches(t *testing.T) {
+	if !partyPostSnapshotTownRefreshSkipEnabled() {
+		t.Fatal("post-snapshot town refresh skip should be enabled by default")
+	}
+	if !partySeriaActorNoOp23Enabled() {
+		t.Fatal("seria actor no-op23 projection should be enabled by default")
+	}
+	t.Setenv(partyPostSnapshotTownRefreshSkipEnv, "legacy")
+	t.Setenv(partySeriaActorNoOp23Env, "legacy")
+	if partyPostSnapshotTownRefreshSkipEnabled() {
+		t.Fatal("legacy env should disable post-snapshot town refresh skip")
+	}
+	if partySeriaActorNoOp23Enabled() {
+		t.Fatal("legacy env should disable seria actor no-op23 projection")
+	}
+}

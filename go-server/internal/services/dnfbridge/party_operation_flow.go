@@ -78,8 +78,8 @@ func (s *Service) finishManagedPartyJoin(f partyJoinFinish) error {
 			return err
 		}
 	}
-	// 5. 城镇同屏 actor 刷新（多人队伍才动作）。
-	s.refreshTownPartyActorsAfterJoin(f.State, f.Source)
+	// 5. 入队后 actor 刷新：城镇成员已在步骤 3 (op11 之前) 完成投影，此处跳过城镇二次投影避免冲断 P2P 握手；副本内成员保留原幂等路径。
+	s.refreshPostSnapshotPartyActorsAfterJoin(f.State, f.Source)
 	return nil
 }
 

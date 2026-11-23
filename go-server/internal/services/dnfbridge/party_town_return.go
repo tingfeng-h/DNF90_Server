@@ -93,7 +93,8 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			if actor.ChannelID != receiverChannelID {
 				continue
 			}
-			if s.townPrivateRoomPeerProjectionBlocked(receiver, actor) {
+			blockPrivateRoom, skipPrivateRoomOp23 := s.townPrivateRoomPeerProjectionPolicy(receiver, actor)
+			if blockPrivateRoom {
 				continue
 			}
 			if s.onlinePlayers.PeerInSameArea(receiver.selectedCharacterID, member.UserID) {
@@ -101,6 +102,9 @@ func (s *Service) rebuildRuntimePartyTownCoPresenceAfterReturn(session *gameSess
 			}
 			if err := s.sendTownRemoteActorState(receiver, actor, source+"_party_peer_actor"); err != nil {
 				return err
+			}
+			if skipPrivateRoomOp23 {
+				continue
 			}
 			areaBody := buildCurrentTownUserAreaNotificationBody(
 				currentSceneActorObjectKey(actor.CharacterID),
