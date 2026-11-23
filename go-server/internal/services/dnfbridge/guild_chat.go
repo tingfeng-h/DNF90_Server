@@ -82,7 +82,7 @@ func (s *Service) handleCurrentGuildChatMessage(session *gameSession, op uint16,
 		return reject("sender_membership_changed", nil)
 	}
 	name, encodeErr := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(character.Name))
-	channel, channelOK := currentSessionOwnerChannelField(session)
+	channel, channelOK := currentNamedChatSenderServerGroup(session, character)
 	if encodeErr != nil || len(name) == 0 || len(name) > 30 || bytes.IndexByte(name, 0) >= 0 || !channelOK {
 		return reject("sender_display", encodeErr)
 	}

@@ -161,7 +161,8 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		}
 	}
 	if sourceID == 0 || parsed.TargetID == 0 || parsed.TargetID == sourceID ||
-		s.onlinePlayers == nil || !s.onlinePlayers.PeerInSameArea(sourceID, parsed.TargetID) {
+		((s.onlinePlayers == nil || !s.onlinePlayers.PeerInSameArea(sourceID, parsed.TargetID)) &&
+			!s.allowSameChannelCrossRoomPartyRequest(session, sourceID, parsed.TargetID, parsed.Mode)) {
 		// 这条**静默丢弃**是"邀请没反应"的另一半：被邀请方的客户端场景里没有邀请者的
 		// actor（不同频道 / 不同城镇区域 / 被邀请方还在"每角色一份"的私有落点房里），
 		// 原生 op7 处理器拿不到目标就画不出框。判据与代发路径
@@ -286,7 +287,8 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		if targetInParty && (!sourceInParty || len(sourceParty.Members) == 1) && targetParty.Leader != targetIdentity.character {
 			leader, online := s.onlineGameSessionCharacterSnapshot(targetParty.Leader)
 			if !online || leader.session == nil || s.partyChannelMismatch(session, leader.session) ||
-				!s.onlinePlayers.PeerInSameArea(sourceID, leader.character) {
+				(!s.onlinePlayers.PeerInSameArea(sourceID, leader.character) &&
+					!s.allowSameChannelCrossRoomPartyRequest(session, sourceID, leader.character, parsed.Mode)) {
 				return s.sendCurrentTownPVPFailure(session, typ, partyCommandFailureGeneric, parsed.Mode)
 			}
 			s.logGameEvent(session, "game-party-join-request-routed-to-leader",
@@ -333,6 +335,9 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		"mode", parsed.Mode,
 		"body_len", len(noticeBody),
 		"body_source", "current_exe_sub_1D82CF0_mode_specific_peer_prompt")
+	if s.shouldPrimeCrossRoomPartyInvite(sourceID, targetIdentity.character, parsed) {
+		s.primeCrossRoomPartyInviteSender(session, targetIdentity.session, sourceID)
+	}
 	return s.sendGameUpperRawClassCodec(targetIdentity.session, 0x0007, noticeBody, 0, true)
 }
 

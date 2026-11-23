@@ -61,7 +61,7 @@ func (s *Service) handleCurrentPartyChat(session *gameSession, op uint16, reques
 		return reject()
 	}
 	name, validName := currentPartyChatName(actor.Name)
-	channel, validChannel := currentSessionOwnerChannelField(session)
+	channel, validChannel := currentNamedChatSenderServerGroup(session, actor)
 	if !validChannel || !validName {
 		return reject()
 	}

@@ -48,6 +48,7 @@ func (s *Service) currentGuildMemberProfileIdentities(a currentGuildMemberProfil
 		a.viewerAccount != "" && a.actorAccount != "" &&
 		s.accountIDForSession(a.viewer.session) == a.viewerAccount && s.accountIDForSession(a.actor.session) == a.actorAccount &&
 		a.viewerChannel > 0 && currentTownPresenceChannelID(a.viewer.session) == a.viewerChannel &&
+		currentGuildMemberProfileChannelAllowed(a.viewerChannel, a.request.channel) &&
 		currentTownPresenceChannelID(a.actor.session) == int(a.request.channel) &&
 		a.request.character == a.actor.character && a.request.directory == s.currentSceneActorRoute()
 }

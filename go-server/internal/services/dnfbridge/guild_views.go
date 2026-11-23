@@ -300,6 +300,9 @@ func (s *Service) sendCurrentGuildRosterDisplay(ctx context.Context, bound bound
 		if primeErr := s.primeCurrentWeddingGuildRosterForBound(ctx, bound, g); primeErr != nil {
 			s.logGameEvent(session, "game-wedding-guild-roster-prime-deferred", "error", primeErr)
 		}
+		if primeErr := s.primeCurrentSameChannelGuildRosterForBound(ctx, bound, g); primeErr != nil {
+			s.logGameEvent(session, "game-guild-roster-same-channel-prime-deferred", "error", primeErr)
+		}
 		if err := s.sendCurrentGuildManagementProjection(session, g, notifyMembership); err != nil {
 			return err
 		}
