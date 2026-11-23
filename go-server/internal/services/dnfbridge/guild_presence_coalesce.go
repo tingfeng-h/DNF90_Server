@@ -223,7 +223,8 @@ func (s *Service) runCurrentGuildPresenceRefresh(p *currentGuildPresenceRefresh)
 	session.guild.mu.Lock()
 	requested := session.guild.memberListRequested
 	session.guild.mu.Unlock()
-	g, err := s.readCurrentGuildDisplayShared(ctx, p.peer, false, requested, shared)
+	sendRoster := requested || guildRosterSameChannelPrimeEnabled()
+	g, err := s.readCurrentGuildDisplayShared(ctx, p.peer, false, sendRoster, shared)
 	if err != nil {
 		s.guildRosterCounter(guildRefreshFailed, 1)
 		return nil
@@ -231,13 +232,10 @@ func (s *Service) runCurrentGuildPresenceRefresh(p *currentGuildPresenceRefresh)
 	if g == nil || g.ID != p.guildID || !s.boundGameSessionCharacterCurrent(p.peer) {
 		return nil
 	}
-	if requested {
+	if sendRoster {
 		var build, write time.Duration
 		err = s.sendCurrentGuildRosterDisplay(ctx, p.peer, g, uint16(dnfenum.CmdPacketGuildAllMemberList), true, true, "presence", true, &build, &write)
 	} else {
-		if primeErr := s.primeCurrentSameChannelGuildRosterForBound(ctx, p.peer, g); primeErr != nil {
-			s.logGameEvent(session, "game-guild-roster-same-channel-prime-deferred", "error", primeErr)
-		}
 		err = s.sendCurrentGuildManagementState(session, g)
 	}
 	if err != nil {
