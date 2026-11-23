@@ -24,13 +24,13 @@ func guildRosterSameChannelPrimeEnabled() bool {
 	}
 }
 
-// primeCurrentSameChannelGuildRosterForBound silently primes category-4
+// primeCurrentSameChannelGuildRosterForBound silently primes category-1
 // cross-scene actor caches (mode8 cacheOnly) for online guild members who are
-// currently on the SAME channel as the viewer, before the op140 guild roster is
-// sent. This ensures same-channel cross-room guild members already have full
-// avatar appearance and adventure club metadata when right-clicked in the guild
-// panel, without creating visible town actors or leaking cross-channel members
-// into local menus.
+// currently on the SAME channel as the viewer, before the op140 guild roster or
+// presence refresh is sent. This ensures same-channel cross-room guild members
+// already have full avatar appearance and adventure club metadata when
+// right-clicked in the guild panel or chat window, without creating visible
+// town actors or leaking cross-channel members into local menus.
 func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context, bound boundGameSessionCharacter, g *dnfguild.Guild) error {
 	if s == nil || g == nil || !guildRosterSameChannelPrimeEnabled() ||
 		s.options.currentClientVersion != "official-24.9" ||
@@ -66,7 +66,7 @@ func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context
 			continue
 		}
 		// Strictly same-channel only: cross-channel members must stay out of
-		// local category-4 cache so their guild menu remains cross-channel.
+		// local cache so their guild/chat menu remains cross-channel.
 		if currentTownPresenceChannelID(peer.session) != viewerChannel {
 			continue
 		}
@@ -100,4 +100,66 @@ func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context
 			"primed_members", primed)
 	}
 	return published
+}
+
+// queuePrimeGuildChatSenderSameChannel asynchronously primes a single mode8
+// frame of the guild chat sender onto a same-channel cross-room recipient's
+// event loop, so clicking the sender's name in chat immediately resolves to
+// the same-channel menu with avatar & adventure name even if the recipient has
+// never opened the guild panel after the sender entered this channel.
+func (s *Service) queuePrimeGuildChatSenderSameChannel(sender boundGameSessionCharacter, recipient boundGameSessionCharacter, guildID uint32) {
+	if s == nil || !guildRosterSameChannelPrimeEnabled() ||
+		s.options.currentClientVersion != "official-24.9" ||
+		sender.session == nil || recipient.session == nil ||
+		sender.session == recipient.session ||
+		sender.character == 0 || recipient.character == 0 || sender.character == recipient.character {
+		return
+	}
+	viewerChannel := currentTownPresenceChannelID(recipient.session)
+	if viewerChannel <= 0 || viewerChannel >= 255 || currentTownPresenceChannelID(sender.session) != viewerChannel {
+		return
+	}
+	if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(recipient.character, sender.character) {
+		return
+	}
+	route := s.currentSceneActorRoute()
+	run := func() error {
+		if !s.boundGameSessionCharacterCurrent(recipient) || !s.boundGameSessionCharacterCurrent(sender) {
+			return nil
+		}
+		if currentTownPresenceChannelID(recipient.session) != viewerChannel || currentTownPresenceChannelID(sender.session) != viewerChannel {
+			return nil
+		}
+		if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(recipient.character, sender.character) {
+			return nil
+		}
+		ctx, cancel := guildChatContext(recipient.session)
+		defer cancel()
+		access, err := s.loadCurrentGuildMemberProfileAccess(ctx, recipient.session, currentGuildMemberProfileRequest{
+			channel:   byte(viewerChannel),
+			character: sender.character,
+			kind:      0,
+			directory: route,
+		})
+		if err != nil || access.guildID != guildID || !s.boundGameSessionCharacterCurrent(recipient) {
+			return nil
+		}
+		if err := s.sendCurrentGuildMemberProfileWithPolicy(ctx, access, true); err != nil {
+			s.logGameEvent(recipient.session, "game-guild-chat-same-channel-prime-deferred",
+				"guild_id", guildID, "sender_char_id", sender.character, "viewer_char_id", recipient.character, "error", err)
+		}
+		return nil
+	}
+	if recipient.session.events == nil || recipient.session.events.loop == nil {
+		_ = run()
+		return
+	}
+	_ = s.tryPostGameSessionCharacterEventWithDiscard(
+		recipient.session,
+		"guild-chat-same-channel-prime",
+		recipient.character,
+		recipient.generation,
+		run,
+		nil,
+	)
 }

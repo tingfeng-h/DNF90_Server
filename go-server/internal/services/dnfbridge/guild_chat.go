@@ -119,6 +119,7 @@ func (s *Service) handleCurrentGuildChatMessage(session *gameSession, op uint16,
 	}
 	release()
 	for _, recipient := range recipients {
+		s.queuePrimeGuildChatSenderSameChannel(source, recipient.identity, initialMember.GuildID)
 		if err := s.queueCurrentGuildChatNotice(recipient, initialMember.GuildID, noticeOpcode, notice); err != nil {
 			s.logWarn("dnfbridge guild chat recipient unavailable", "source_char_id", source.character,
 				"target_char_id", recipient.identity.character, "stage", "enqueue", "error", err)

@@ -235,6 +235,9 @@ func (s *Service) runCurrentGuildPresenceRefresh(p *currentGuildPresenceRefresh)
 		var build, write time.Duration
 		err = s.sendCurrentGuildRosterDisplay(ctx, p.peer, g, uint16(dnfenum.CmdPacketGuildAllMemberList), true, true, "presence", true, &build, &write)
 	} else {
+		if primeErr := s.primeCurrentSameChannelGuildRosterForBound(ctx, p.peer, g); primeErr != nil {
+			s.logGameEvent(session, "game-guild-roster-same-channel-prime-deferred", "error", primeErr)
+		}
 		err = s.sendCurrentGuildManagementState(session, g)
 	}
 	if err != nil {
