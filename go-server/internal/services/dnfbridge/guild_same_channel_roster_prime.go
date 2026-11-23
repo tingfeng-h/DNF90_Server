@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	dnfguild "longheng.io/server/internal/modules/dnf/guild"
+	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
 const (
@@ -24,13 +25,66 @@ func guildRosterSameChannelPrimeEnabled() bool {
 	}
 }
 
+// primeSingleSameChannelGuildMode8 builds and sends one silent mode8 cache
+// frame of `peer` to `viewer` using sendCurrentCrossSceneProfileRefreshFrame.
+// Crucially, it does NOT call reserveCurrentGuildParticipants(viewer, peer):
+// callers such as runCurrentGuildPresenceRefresh already hold the non-reentrant
+// participant reservation on `viewer`, so re-entering it would self-deadlock
+// until ctx timeout and silently drop the mode8 update when a guildmate enters
+// the viewer's channel.
+func (s *Service) primeSingleSameChannelGuildMode8(ctx context.Context, viewer boundGameSessionCharacter, peer boundGameSessionCharacter, viewerChannel int) (bool, error) {
+	if s == nil || viewer.session == nil || peer.session == nil || viewer.session == peer.session ||
+		viewerChannel <= 0 || viewerChannel >= 255 {
+		return false, nil
+	}
+	if !s.boundGameSessionCharacterCurrent(viewer) || !s.boundGameSessionCharacterCurrent(peer) {
+		return false, nil
+	}
+	if currentTownPresenceChannelID(viewer.session) != viewerChannel ||
+		currentTownPresenceChannelID(peer.session) != viewerChannel {
+		return false, nil
+	}
+	if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(viewer.character, peer.character) {
+		return false, nil
+	}
+	owner := byte(viewerChannel)
+	revision := currentCrossSceneAppearanceRevision(peer.session)
+	route := s.currentSceneActorRoute()
+	loadedID, name, character, found := s.characterForEnter(ctx, peer.session, peer.character)
+	if !found || loadedID != peer.character || character.CharacterID != strconv.Itoa(int(peer.character)) || name == "" {
+		return false, nil
+	}
+	mode0, err := s.buildCurrentSceneObjectListBodyForSessionInContextStrict(ctx, peer.session, peer.character, name, character, true, owner)
+	if err != nil {
+		return false, err
+	}
+	var legacyRepo dnfrepo.LegacyUserInfoRepository
+	if repositories, ok := s.repositoryGroupFor(ctx); ok {
+		legacyRepo = repositories.LegacyUserInfo
+	}
+	mode3Ctx := context.WithValue(ctx, nativePeerProfileSkillsKey{}, strconv.Itoa(int(peer.character)))
+	if buffSwapReapplyEnabled() {
+		mode3Ctx = context.WithValue(mode3Ctx, nativePeerBuffInspectKey{}, strconv.Itoa(int(peer.character)))
+	}
+	mode3 := s.buildCurrentSelectedUserInfoMode3BodyInContext(mode3Ctx, peer.session, legacyRepo, character, true, peer.character, owner)
+	priming, err := buildCurrentCrossSceneUserInfoBody(mode0, mode3)
+	if err != nil {
+		return false, err
+	}
+	return s.sendCurrentCrossSceneProfileRefreshFrame(ctx, viewer.session, peer.session, priming, func() bool {
+		return revision == peer.session.crossSceneAppearanceRevision &&
+			route == s.currentSceneActorRoute() &&
+			s.boundGameSessionCharacterCurrent(viewer) &&
+			s.boundGameSessionCharacterCurrent(peer) &&
+			currentTownPresenceChannelID(viewer.session) == viewerChannel &&
+			currentTownPresenceChannelID(peer.session) == viewerChannel
+	}, false)
+}
+
 // primeCurrentSameChannelGuildRosterForBound silently primes category-1
 // cross-scene actor caches (mode8 cacheOnly) for online guild members who are
 // currently on the SAME channel as the viewer, before the op140 guild roster or
-// presence refresh is sent. This ensures same-channel cross-room guild members
-// already have full avatar appearance and adventure club metadata when
-// right-clicked in the guild panel or chat window, without creating visible
-// town actors or leaking cross-channel members into local menus.
+// presence refresh is sent.
 func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context, bound boundGameSessionCharacter, g *dnfguild.Guild) error {
 	if s == nil || g == nil || !guildRosterSameChannelPrimeEnabled() ||
 		s.options.currentClientVersion != "official-24.9" ||
@@ -43,7 +97,6 @@ func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context
 		return nil
 	}
 	viewerID := strconv.Itoa(int(bound.character))
-	route := s.currentSceneActorRoute()
 	var (
 		published error
 		primed    int
@@ -65,32 +118,20 @@ func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context
 			s.accountIDForSession(peer.session) != member.AccountID {
 			continue
 		}
-		// Strictly same-channel only: cross-channel members must stay out of
-		// local cache so their guild/chat menu remains cross-channel.
 		if currentTownPresenceChannelID(peer.session) != viewerChannel {
 			continue
 		}
-		// Peers already in the exact same town area already receive mode0.
 		if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(bound.character, targetID) {
 			continue
 		}
-		access, err := s.loadCurrentGuildMemberProfileAccess(ctx, viewer, currentGuildMemberProfileRequest{
-			channel:   byte(viewerChannel),
-			character: targetID,
-			kind:      0,
-			directory: route,
-		})
+		delivered, err := s.primeSingleSameChannelGuildMode8(ctx, bound, peer, viewerChannel)
 		if err != nil {
-			continue
-		}
-		if access.guildID != g.ID || !s.boundGameSessionCharacterCurrent(bound) {
-			continue
-		}
-		if err := s.sendCurrentGuildMemberProfileWithPolicy(ctx, access, true); err != nil {
 			published = errors.Join(published, err)
 			continue
 		}
-		primed++
+		if delivered {
+			primed++
+		}
 	}
 	if primed > 0 {
 		s.logGameEvent(viewer, "game-guild-roster-same-channel-primed",
@@ -104,9 +145,7 @@ func (s *Service) primeCurrentSameChannelGuildRosterForBound(ctx context.Context
 
 // queuePrimeGuildChatSenderSameChannel asynchronously primes a single mode8
 // frame of the guild chat sender onto a same-channel cross-room recipient's
-// event loop, so clicking the sender's name in chat immediately resolves to
-// the same-channel menu with avatar & adventure name even if the recipient has
-// never opened the guild panel after the sender entered this channel.
+// event loop.
 func (s *Service) queuePrimeGuildChatSenderSameChannel(sender boundGameSessionCharacter, recipient boundGameSessionCharacter, guildID uint32) {
 	if s == nil || !guildRosterSameChannelPrimeEnabled() ||
 		s.options.currentClientVersion != "official-24.9" ||
@@ -122,29 +161,10 @@ func (s *Service) queuePrimeGuildChatSenderSameChannel(sender boundGameSessionCh
 	if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(recipient.character, sender.character) {
 		return
 	}
-	route := s.currentSceneActorRoute()
 	run := func() error {
-		if !s.boundGameSessionCharacterCurrent(recipient) || !s.boundGameSessionCharacterCurrent(sender) {
-			return nil
-		}
-		if currentTownPresenceChannelID(recipient.session) != viewerChannel || currentTownPresenceChannelID(sender.session) != viewerChannel {
-			return nil
-		}
-		if s.onlinePlayers != nil && s.onlinePlayers.PeerInSameArea(recipient.character, sender.character) {
-			return nil
-		}
 		ctx, cancel := guildChatContext(recipient.session)
 		defer cancel()
-		access, err := s.loadCurrentGuildMemberProfileAccess(ctx, recipient.session, currentGuildMemberProfileRequest{
-			channel:   byte(viewerChannel),
-			character: sender.character,
-			kind:      0,
-			directory: route,
-		})
-		if err != nil || access.guildID != guildID || !s.boundGameSessionCharacterCurrent(recipient) {
-			return nil
-		}
-		if err := s.sendCurrentGuildMemberProfileWithPolicy(ctx, access, true); err != nil {
+		if _, err := s.primeSingleSameChannelGuildMode8(ctx, recipient, sender, viewerChannel); err != nil {
 			s.logGameEvent(recipient.session, "game-guild-chat-same-channel-prime-deferred",
 				"guild_id", guildID, "sender_char_id", sender.character, "viewer_char_id", recipient.character, "error", err)
 		}
