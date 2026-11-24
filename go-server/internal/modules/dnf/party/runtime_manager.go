@@ -301,7 +301,7 @@ func (m *RuntimePartyManager) leaveLocked(userID uint16, generation uint64, allo
 	// 单变量实验（默认 off）：2 -> 1 直接解散，不留下 1 人残党。
 	// 客户端没有「1 人普通队伍」状态，1 人 op9 会让血条永久残留且无法退队。
 	// Retired 带上解散前的完整快照（含幸存者），桥层据此下发 kind3 清场并关中继。
-	if disbandOnSingleton() && party.count() == 1 {
+	if disbandOnSingletonTown() && party.count() == 1 {
 		for _, survivor := range party.membersBySlot() {
 			delete(m.byUser, survivor.UserID)
 		}
@@ -351,6 +351,13 @@ func (m *RuntimePartyManager) leaveLocked(userID uint16, generation uint64, allo
 }
 
 func (m *RuntimePartyManager) Kick(byUser uint16, byGeneration uint64, targetUser uint16, targetGeneration uint64) RuntimePartyResult {
+	return m.KickInContext(byUser, byGeneration, targetUser, targetGeneration, false)
+}
+
+// KickInContext removes targetUser from the leader's party. When inDungeon is
+// true, 2 -> 1 always follows disbandOnSingleton(); in town it honors
+// DNFBRIDGE_TOWN_PARTY_KEEP_SINGLETON.
+func (m *RuntimePartyManager) KickInContext(byUser uint16, byGeneration uint64, targetUser uint16, targetGeneration uint64, inDungeon bool) RuntimePartyResult {
 	if m == nil || byUser == 0 || targetUser == 0 || byUser == targetUser || byGeneration == 0 || targetGeneration == 0 {
 		return runtimePartyFailure("invalid_kick")
 	}
@@ -382,7 +389,7 @@ func (m *RuntimePartyManager) Kick(byUser uint16, byGeneration uint64, targetUse
 		delete(m.parties, party.id)
 		return RuntimePartyResult{OK: true, Previous: &previousCopy, TargetUser: targetUser, Disbanded: true}
 	}
-	if disbandOnSingleton() && party.count() == 1 {
+	if (inDungeon && disbandOnSingleton() || !inDungeon && disbandOnSingletonTown()) && party.count() == 1 {
 		for _, survivor := range party.membersBySlot() {
 			delete(m.byUser, survivor.UserID)
 		}
@@ -806,14 +813,4 @@ func normalizeRuntimePartyMember(member alignedcmd.PartyMemberState, userID uint
 func cloneRuntimePartyMember(member RuntimePartyMember) RuntimePartyMember {
 	member.State = normalizeRuntimePartyMember(member.State, member.UserID)
 	return member
-}
-
-// KickInContext 是带上下文语义的踢人入口：inDungeon 为 true 表示踢人发生在副本内，
-// 调用方要求保留副本侧的实例/槽位语义。当前实现与 Kick 等价（保留既有行为），
-// inDungeon 预留给后续"副本内保留槽位、只移除成员"的分支。
-func (m *RuntimePartyManager) KickInContext(
-	byUser uint16, byGeneration uint64, targetUser uint16, targetGeneration uint64, inDungeon bool,
-) RuntimePartyResult {
-	_ = inDungeon
-	return m.Kick(byUser, byGeneration, targetUser, targetGeneration)
 }

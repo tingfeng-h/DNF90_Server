@@ -290,8 +290,6 @@ func (s *Service) detachRuntimePartySession(session *gameSession, source string)
 						_ = s.sendDungeonDepartedActorRemoval(target, identity.character, "detach:"+source)
 					} else if err := s.sendRuntimePartyDeparture(target, result.Retired.StateFor(member.UserID)); err != nil {
 						s.logWarn("dnfbridge deferred retired party departure during session detach", "source", source, "char_id", identity.character, "error", err)
-					} else if err := s.retainTownSingletonPartyAfterDisband(target, *result.Retired, "town_detach:"+source); err != nil {
-						s.logWarn("dnfbridge retain town singleton party during session detach", "source", source, "char_id", identity.character, "error", err)
 					}
 				} else {
 					if err := s.sendRuntimePartySnapshot(target, alignedcmd.PartyState{}); err != nil {
