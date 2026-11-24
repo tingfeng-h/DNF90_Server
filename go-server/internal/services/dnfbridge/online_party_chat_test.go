@@ -66,9 +66,12 @@ func TestPartyChatNativeRequestRoutesOnlyToCurrentMembers(t *testing.T) {
 		t.Fatalf("party ACK=%x", ack.Body)
 	}
 	echo, rest := splitCurrentGameServerUpperPacketAuto(t, rest)
-	channel, _ := currentSessionOwnerChannelField(peers[29])
-	want := buildCurrentPartyChatBody(channel, rosterNameBytes("角色29"), []byte("hello"))
-	if echo.Header.Classification != 0 || echo.Header.MsgID != 65 || !bytes.Equal(echo.Body, want) || len(rest) != 0 {
+	channel := byte(0)
+	if currentNamedChatServerGroupLegacyEnabled() {
+		channel, _ = currentSessionOwnerChannelField(peers[29])
+	}
+	wantOp, want := currentPartyChatNoticePayload(channel, 29, rosterNameBytes("角色29"), []byte("hello"))
+	if echo.Header.Classification != 0 || echo.Header.MsgID != wantOp || !bytes.Equal(echo.Body, want) || len(rest) != 0 {
 		t.Fatalf("echo=%+v", echo)
 	}
 	notice, rest := splitCurrentGameServerUpperPacketAuto(t, peers[31].conn.(*bufferConn).write.Bytes())

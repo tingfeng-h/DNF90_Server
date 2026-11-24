@@ -147,3 +147,24 @@ func TestCharacterFriendRealtimePresenceSwitchAndWatchers(t *testing.T) {
 		t.Fatalf("expected watcher cleanup after unregister, got %d", remaining)
 	}
 }
+
+func TestPartyChatNoti12BubbleSwitchAndPayload(t *testing.T) {
+	if !partyChatNoti12BubbleEnabled() {
+		t.Fatal("party chat NOTI12 bubble should be enabled by default")
+	}
+	op, body := currentPartyChatNoticePayload(0, 29, []byte("Peer29"), []byte("hi"))
+	if op != currentAreaChatNotifyOpcode {
+		t.Fatalf("expected NOTI 12, got %d", op)
+	}
+	if len(body) < 4 || body[0] != currentPartyChatType || body[1] != 29 || body[2] != 0 || body[3] != 0 {
+		t.Fatalf("unexpected NOTI 12 party chat header: %x", body)
+	}
+	t.Setenv(partyChatNoti12BubbleEnv, "legacy")
+	if partyChatNoti12BubbleEnabled() {
+		t.Fatal("legacy env should disable party chat NOTI12 bubble")
+	}
+	opLegacy, _ := currentPartyChatNoticePayload(0, 29, []byte("Peer29"), []byte("hi"))
+	if opLegacy != currentOfficialWhisperNotifyOpcode {
+		t.Fatalf("expected legacy NOTI 65, got %d", opLegacy)
+	}
+}

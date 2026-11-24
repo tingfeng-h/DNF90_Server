@@ -55,14 +55,17 @@ func (s *Service) handleCurrentPartyChat(session *gameSession, op uint16, reques
 	if err != nil || !found || account == "" || actor.AccountID != account {
 		return reject()
 	}
-	manager := s.runtimePartyManagerForService()
-	state, found := manager.SnapshotByUser(identity.character, identity.generation)
-	if !found || len(state.Members) < 2 {
-		return reject()
-	}
 	name, validName := currentPartyChatName(actor.Name)
 	channel, validChannel := currentNamedChatSenderServerGroup(session, actor)
 	if !validChannel || !validName {
+		return reject()
+	}
+	manager := s.runtimePartyManagerForService()
+	state, found := manager.SnapshotByUser(identity.character, identity.generation)
+	if !found || len(state.Members) < 2 {
+		if partyChatNoti12BubbleEnabled() && s.sessionInActiveDungeon(session) {
+			return s.handleCurrentSoloDungeonPartyChat(ctx, session, op, identity, channel, name, request.Message)
+		}
 		return reject()
 	}
 	validate := func() error {
@@ -75,8 +78,8 @@ func (s *Service) handleCurrentPartyChat(session *gameSession, op uint16, reques
 	if err := s.sendCurrentGuildChatFrameChecked(ctx, session, op, []byte{1}, 1, validate); err != nil {
 		return err
 	}
-	body := buildCurrentPartyChatBody(channel, name, request.Message)
-	if err := s.sendCurrentGuildChatFrameChecked(ctx, session, currentOfficialWhisperNotifyOpcode, body, 0, validate); err != nil {
+	noticeOpcode, body := currentPartyChatNoticePayload(channel, identity.character, name, request.Message)
+	if err := s.sendCurrentGuildChatFrameChecked(ctx, session, noticeOpcode, body, 0, validate); err != nil {
 		return err
 	}
 	s.releaseCurrentCharacterAssets(reservation)
@@ -92,7 +95,7 @@ func (s *Service) handleCurrentPartyChat(session *gameSession, op uint16, reques
 		if !belongs || current.ID != state.ID || len(current.Members) < 2 {
 			continue
 		}
-		if err := s.queueCurrentPartyChat(peer, state.ID, body); err != nil {
+		if err := s.queueCurrentPartyChatWithOpcode(peer, state.ID, noticeOpcode, body); err != nil {
 			s.logWarn("dnfbridge party chat recipient unavailable", "party_id", state.ID, "target_char_id", member.UserID, "error", err)
 		}
 	}
@@ -102,6 +105,10 @@ func (s *Service) handleCurrentPartyChat(session *gameSession, op uint16, reques
 }
 
 func (s *Service) queueCurrentPartyChat(peer boundGameSessionCharacter, partyID uint16, body []byte) error {
+	return s.queueCurrentPartyChatWithOpcode(peer, partyID, currentOfficialWhisperNotifyOpcode, body)
+}
+
+func (s *Service) queueCurrentPartyChatWithOpcode(peer boundGameSessionCharacter, partyID uint16, noticeOpcode uint16, body []byte) error {
 	p := peer.session
 	if p == nil || p.loginRevoked.Load() {
 		return errInvalidGameSessionEvent
@@ -134,7 +141,7 @@ func (s *Service) queueCurrentPartyChat(peer boundGameSessionCharacter, partyID 
 			}
 			return nil
 		}
-		if err := s.sendCurrentGuildChatFrameChecked(ctx, p, currentOfficialWhisperNotifyOpcode, body, 0, validate); err != nil {
+		if err := s.sendCurrentGuildChatFrameChecked(ctx, p, noticeOpcode, body, 0, validate); err != nil {
 			s.logWarn("dnfbridge party chat recipient unavailable", "party_id", partyID, "target_char_id", peer.character, "error", err)
 		}
 		return nil
