@@ -67,10 +67,14 @@ func parseAccountFriendInfoRows(t *testing.T, body []byte) []currentAccountFrien
 		offset += 4
 		flag := body[offset] != 0
 		offset++
+		advName, charName := adv, name
+		if accountFriendNativeFieldsEnabled() {
+			charName, advName = adv, name
+		}
 		rows = append(rows, currentAccountFriendNativeRow{
-			Head: head, NeutralState: state, AdventureName: adv,
+			Head: head, NeutralState: state, AdventureName: advName,
 			Level: level, Job: job, Grow: grow, Channel: channel,
-			CharacterName: name, Remark: remark, NeutralFlag: flag,
+			CharacterName: charName, Remark: remark, NeutralFlag: flag,
 		})
 	}
 	if offset != len(body) {
@@ -93,9 +97,13 @@ func TestAccountFriendGroupRowSwitchesRepresentativeWith1373Then1371(t *testing.
 	_ = ac
 	_ = bc
 
-	// Before the switch the only online character of dnf:2 is 来来来 (id 5), so the
-	// session cache holds exactly that one row name.
-	if _, exists := a.currentAccountFriendNames["来来来"]; !exists {
+	// Before the switch, the session cache holds the primary key (+0x54):
+	// AdventureName ("Beta") in native layout, or CharacterName ("来来来") in legacy.
+	wantBaselineKey := "来来来"
+	if accountFriendNativeFieldsEnabled() {
+		wantBaselineKey = "Beta"
+	}
+	if _, exists := a.currentAccountFriendNames[wantBaselineKey]; !exists {
 		t.Fatalf("baseline row name not cached: %v", a.currentAccountFriendNames)
 	}
 
@@ -132,6 +140,18 @@ func TestAccountFriendGroupRowSwitchesRepresentativeWith1373Then1371(t *testing.
 		t.Fatal(err)
 	}
 	ids := accountFriendPacketIDs(t, ac)
+	if accountFriendNativeFieldsEnabled() {
+		if len(ids) != 2 || ids[0] != 1371 || ids[1] != 1372 {
+			t.Fatalf("native representative switch should upsert in-place: %v", ids)
+		}
+		if len(a.currentAccountFriendNames) != 1 {
+			t.Fatalf("session row cache must hold one adventure key: %v", a.currentAccountFriendNames)
+		}
+		if _, exists := a.currentAccountFriendNames["Beta"]; !exists {
+			t.Fatalf("session row cache must keep Beta: %v", a.currentAccountFriendNames)
+		}
+		return
+	}
 	if len(ids) != 3 || ids[0] != 1373 || ids[1] != 1371 || ids[2] != 1372 {
 		t.Fatalf("representative switch packet order: %v", ids)
 	}

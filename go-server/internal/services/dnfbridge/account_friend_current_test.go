@@ -179,7 +179,11 @@ func TestAccountFriendPresenceUsesSessionDirectoryAndRemovesRenamedRow(t *testin
 		t.Fatal(err)
 	}
 	ids = accountFriendPacketIDs(t, ac)
-	if len(ids) != 3 || ids[0] != 1373 || ids[1] != 1371 || ids[2] != 1372 {
+	if accountFriendNativeFieldsEnabled() {
+		if len(ids) != 2 || ids[0] != 1371 || ids[1] != 1372 {
+			t.Fatal("renamed character should upsert same adventure-name row in-place", ids)
+		}
+	} else if len(ids) != 3 || ids[0] != 1373 || ids[1] != 1371 || ids[2] != 1372 {
 		t.Fatal("stale renamed node left in native manager", ids)
 	}
 }
