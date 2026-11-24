@@ -138,7 +138,12 @@ func TestPartyChatLeaveStaleProjectionAndRegroup(t *testing.T) {
 	}
 	requireGuildChatNotice(t, peers[30], 1)
 	requireGuildChatNotice(t, peers[33], 1)
-	requireGuildChatNotice(t, peers[31], 1)
+	if partyChatNoti12BubbleEnabled() {
+		requireGuildChatNotice(t, peers[31], 0)
+		requirePartyChatNotice(t, peers[31], 1)
+	} else {
+		requireGuildChatNotice(t, peers[31], 1)
+	}
 }
 
 func TestPartyChatRejectsMalformedAndWrongOwner(t *testing.T) {
