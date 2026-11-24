@@ -142,6 +142,9 @@ func currentDungeonCardFlipRowStateValue(session *gameSession) byte {
 	}
 	slot := currentDungeonCardPartySlot(session)
 	if slot < 0 {
+		slot = currentDungeonCardEntryPartySlotFallback(session)
+	}
+	if slot < 0 {
 		slot = currentTournamentLocalPartySlot(session)
 	}
 	if slot < 0 || slot >= dungeonCardSlotsPerSide {

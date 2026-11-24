@@ -404,7 +404,7 @@ func currentDungeonClearRewardCardSlotsFromRuntime(runtime *runtimeDungeonState,
 	plan := cloneDungeonCardRewardPlan(runtime.settlementCardRewardState.plan)
 	runtime.settlementCardRewardState.mu.Unlock()
 	owner := 0
-	if runtime.partyInstance != nil && len(partySlot) > 0 && partySlot[0] < dungeonCardSlotsPerSide {
+	if (runtime.partyInstance != nil || (dungeonPartyCardDisbandEntrySlotEnabled() && runtime.partyMemberIndexed)) && len(partySlot) > 0 && partySlot[0] < dungeonCardSlotsPerSide {
 		owner = int(partySlot[0])
 	}
 	currentDungeonProjectCardBundleToClearRewardSlots(&slots, owner, plan.Sides[dungeonCardSideFree])
