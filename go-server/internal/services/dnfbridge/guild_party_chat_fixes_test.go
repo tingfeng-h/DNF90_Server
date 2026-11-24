@@ -251,3 +251,50 @@ func TestPartyUDPRelayIPRoamingPolicy(t *testing.T) {
 		t.Fatal("expected roaming to new IP after idle threshold")
 	}
 }
+
+func TestWhisperAndPartyItemHyperlinkDecodeAndEncode(t *testing.T) {
+	item := make([]byte, currentItemHyperlinkItemSize)
+	item[0] = 0x55
+
+	// 1. Main whisper (type=1) with TargetID=0, TargetName, TrailingGroup, and 1 item at the end.
+	var ww packetWriter
+	ww.writeByte(1)
+	ww.writeUint16(0)
+	ww.writeUint32(0)
+	ww.writeRawDstr([]byte("check [item]"))
+	ww.writeRawDstr([]byte("PeerB"))
+	ww.writeByte(0)
+	ww.writeByte(1)
+	ww.writeBytes(item)
+	wreq, witems, err := decodeCurrentWhisperItemHyperlinkRequest(ww.bytes())
+	if err != nil {
+		t.Fatalf("expected whisper hyperlink to decode, got %v", err)
+	}
+	if wreq.MessageType != 1 || wreq.TargetID != 0 || len(witems) != 1 || string(wreq.TargetName) != "PeerB" {
+		t.Fatalf("unexpected whisper hyperlink decode: %+v items=%d", wreq, len(witems))
+	}
+	noti371 := buildCurrentWhisperItemHyperlinkNoti371Body(1, 0, "PeerA", wreq.Message, witems)
+	if len(noti371) < 2 || noti371[0] != 1 || noti371[1] != 0 {
+		t.Fatalf("unexpected NOTI 371 whisper header: %x", noti371[:4])
+	}
+
+	// 2. Party chat (type=2) with 1 item.
+	var pw packetWriter
+	pw.writeByte(currentPartyChatType)
+	pw.writeUint16(0)
+	pw.writeUint32(0)
+	pw.writeRawDstr([]byte("party [item]"))
+	pw.writeByte(1)
+	pw.writeBytes(item)
+	preq, err := decodeCurrentPartyItemHyperlinkRequest(pw.bytes())
+	if err != nil {
+		t.Fatalf("expected party hyperlink to decode, got %v", err)
+	}
+	if preq.MessageType != currentPartyChatType || len(preq.Items) != 1 {
+		t.Fatalf("unexpected party hyperlink decode: %+v", preq)
+	}
+	noti370 := buildCurrentPartyItemHyperlinkNoti370Body(0, 29, preq.Message, preq.Items)
+	if len(noti370) < 4 || noti370[0] != currentPartyChatType || noti370[1] != 29 {
+		t.Fatalf("unexpected NOTI 370 party header: %x", noti370[:4])
+	}
+}

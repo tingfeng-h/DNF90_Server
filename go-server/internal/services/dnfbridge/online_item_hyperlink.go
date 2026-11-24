@@ -89,6 +89,14 @@ func buildCurrentItemHyperlinkNoticeBody(serverGroup byte, senderID uint16, mess
 }
 
 func (s *Service) handleCurrentItemHyperlinkMessage(session *gameSession, typ uint16, body []byte) error {
+	if whisperAndPartyItemHyperlinkEnabled() && len(body) > 0 {
+		switch {
+		case body[0] == 1 || isCurrentPrivateWhisperType(body[0]):
+			return s.handleCurrentWhisperItemHyperlink(session, typ, body)
+		case body[0] == currentPartyChatType:
+			return s.handleCurrentPartyItemHyperlink(session, typ, body)
+		}
+	}
 	request, err := decodeCurrentItemHyperlinkRequest(body)
 	if err != nil {
 		s.logGameEvent(session, "game-item-hyperlink-request-rejected", "body_len", len(body), "error", err)
