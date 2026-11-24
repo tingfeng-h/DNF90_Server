@@ -20,6 +20,25 @@ func partyChatRequest(id uint16, text string) []byte {
 	return b
 }
 
+func requirePartyChatNotice(t *testing.T, p *gameSession, count int) {
+	t.Helper()
+	wantMsgID := currentOfficialWhisperNotifyOpcode
+	if partyChatNoti12BubbleEnabled() {
+		wantMsgID = currentAreaChatNotifyOpcode
+	}
+	got := 0
+	for wire := p.conn.(*bufferConn).write.Bytes(); len(wire) > 0; {
+		packet, rest := splitCurrentGameServerUpperPacketAuto(t, wire)
+		wire = rest
+		if packet.Header.Classification == 0 && packet.Header.MsgID == wantMsgID {
+			got++
+		}
+	}
+	if got != count {
+		t.Fatalf("character=%d party_notices(msg=%d)=%d want=%d", p.selectedCharacterID, wantMsgID, got, count)
+	}
+}
+
 func partyChatGroup(t *testing.T, s *Service, peers map[uint16]*gameSession, ids ...uint16) uint16 {
 	t.Helper()
 	manager := s.runtimePartyManagerForService()
@@ -67,7 +86,7 @@ func TestPartyChatNativeRequestRoutesOnlyToCurrentMembers(t *testing.T) {
 	}
 	echo, rest := splitCurrentGameServerUpperPacketAuto(t, rest)
 	channel := byte(0)
-	if currentNamedChatServerGroupLegacyEnabled() {
+	if !namedChatServerGroupEnabled() {
 		channel, _ = currentSessionOwnerChannelField(peers[29])
 	}
 	wantOp, want := currentPartyChatNoticePayload(channel, 29, rosterNameBytes("角色29"), []byte("hello"))
@@ -110,9 +129,9 @@ func TestPartyChatLeaveStaleProjectionAndRegroup(t *testing.T) {
 	if err := s.handleCurrentPeerChat(peers[29], 17, partyChatRequest(29, "new party")); err != nil {
 		t.Fatal(err)
 	}
-	requireGuildChatNotice(t, peers[29], 1)
-	requireGuildChatNotice(t, peers[31], 1)
-	requireGuildChatNotice(t, peers[30], 0)
+	requirePartyChatNotice(t, peers[29], 1)
+	requirePartyChatNotice(t, peers[31], 1)
+	requirePartyChatNotice(t, peers[30], 0)
 	// Guild chat still targets the guild after party leave/regroup.
 	if err := s.handleCurrentPeerChat(peers[29], 17, guildChatRequest(29, "guild")); err != nil {
 		t.Fatal(err)
@@ -177,6 +196,8 @@ func TestPartyChatQueuedRecipientLeaveAndRebind(t *testing.T) {
 			case "rebind":
 				s.bindGameSessionCharacter(peers[30], 32)
 			}
+			// Clear any guild-presence mode8 priming emitted during rebind so we assert only on the queued party chat.
+			recipient.conn.(*bufferConn).write.Reset()
 			if err := s.queueCurrentPartyChat(old, id, buildCurrentPartyChatBody(11, []byte("alice"), []byte("late"))); err != nil {
 				t.Fatal(err)
 			}
@@ -309,6 +330,6 @@ func TestPartyChatSlowPeerDoesNotBlockOtherMembers(t *testing.T) {
 		t.Fatal("slow peer blocked sender")
 	}
 	flushGuildChatTestEvents(t, s, peers[33])
-	requireGuildChatNotice(t, peers[33], 1)
+	requirePartyChatNotice(t, peers[33], 1)
 	client.Close()
 }
