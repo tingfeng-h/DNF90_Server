@@ -807,3 +807,13 @@ func cloneRuntimePartyMember(member RuntimePartyMember) RuntimePartyMember {
 	member.State = normalizeRuntimePartyMember(member.State, member.UserID)
 	return member
 }
+
+// KickInContext 是带上下文语义的踢人入口：inDungeon 为 true 表示踢人发生在副本内，
+// 调用方要求保留副本侧的实例/槽位语义。当前实现与 Kick 等价（保留既有行为），
+// inDungeon 预留给后续"副本内保留槽位、只移除成员"的分支。
+func (m *RuntimePartyManager) KickInContext(
+	byUser uint16, byGeneration uint64, targetUser uint16, targetGeneration uint64, inDungeon bool,
+) RuntimePartyResult {
+	_ = inDungeon
+	return m.Kick(byUser, byGeneration, targetUser, targetGeneration)
+}
