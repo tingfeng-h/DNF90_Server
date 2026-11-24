@@ -33,8 +33,5 @@ func currentNamedChatSenderServerGroup(session *gameSession, character dnfrepo.C
 	return currentChatCharacterServerGroup(character)
 }
 
-// namedChatServerGroupEnabled 是"原生字段模式是否启用"的可读别名：
-// legacy 档返回 false，其余（默认）返回 true。测试用它判断期望的 channel 字节。
-func namedChatServerGroupEnabled() bool {
-	return !currentNamedChatServerGroupLegacyEnabled()
-}
+// namedChatServerGroupEnabled 是"原生字段模式是否启用"的可读别名。
+func namedChatServerGroupEnabled() bool { return !currentNamedChatServerGroupLegacyEnabled() }

@@ -445,6 +445,9 @@ func (s *Service) handleOnlineLeaveParty(session *gameSession, typ uint16) error
 					if err := s.sendRuntimePartyDeparture(targetSession, result.Retired.StateFor(member.UserID)); err != nil {
 						return err
 					}
+					if err := s.retainTownSingletonPartyAfterDisband(targetSession, *result.Retired, "town_leave"); err != nil {
+						return err
+					}
 				} else {
 					if err := s.sendRuntimePartySnapshot(targetSession, alignedcmd.PartyState{}); err != nil {
 						return err
@@ -644,6 +647,9 @@ func (s *Service) handleOnlineWalkoutPartyMember(session *gameSession, typ uint1
 			}
 			if peerSession, ok := s.onlineGameSession(member.UserID); ok && peerSession != nil {
 				if err := s.sendRuntimePartyDeparture(peerSession, kickedSnapshot.StateFor(member.UserID)); err != nil {
+					return err
+				}
+				if err := s.retainTownSingletonPartyAfterDisband(peerSession, kickedSnapshot, "town_kick"); err != nil {
 					return err
 				}
 			}

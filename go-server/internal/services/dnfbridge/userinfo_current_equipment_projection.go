@@ -191,7 +191,7 @@ func (r *csharpLegacyUserInfoReader) currentMode1EquipmentObjectRows() []current
 			state169:            sceneInventoryExtraByte(equipped.Extra, "mode1_state_169", "state_169"),
 			state170:            sceneInventoryExtraByte(equipped.Extra, "mode1_state_170", "state_170"),
 			lateRawC:            currentMode1EquipmentExtraHex(equipped.Extra, currentMode1EquipmentRawBlockMaxLen, "mode1_raw_c_hex", "mode1_state_171_raw_hex"),
-			lateRawD:            currentMode1EquipmentExtraHex(equipped.Extra, currentMode1EquipmentRawBlockMaxLen, "mode1_raw_d_hex", "mode1_state_175_179_raw_hex"),
+			lateRawD:            currentMode1EquipmentGuardianGemRawDFromItem(equipped.Extra, entry),
 			state183:            sceneInventoryExtraByte(equipped.Extra, "mode1_state_183", "state_183"),
 			lateRawE:            currentMode1EquipmentCustomStateFromItem(equipped.Extra, entry),
 			update:              entry,
