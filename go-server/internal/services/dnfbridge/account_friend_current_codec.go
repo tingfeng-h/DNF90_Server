@@ -160,19 +160,20 @@ func buildCurrentAccountFriendInfoBody(rows []currentAccountFriendNativeRow) ([]
 	var w packetWriter
 	w.writeByte(byte(len(rows)))
 	for _, r := range rows {
-		if r.AdventureName == "" || r.CharacterName == "" || !nativeAccountFriendTextValid(r.AdventureName, 30) || !nativeAccountFriendTextValid(r.CharacterName, 17) || !nativeAccountFriendTextValid(r.Remark, 41) {
+		firstName, firstCap, secondName, secondCap := accountFriendNativeRowWireNames(r)
+		if firstName == "" || secondName == "" || !nativeAccountFriendTextValid(firstName, firstCap) || !nativeAccountFriendTextValid(secondName, secondCap) || !nativeAccountFriendTextValid(r.Remark, 41) {
 			return nil, errCurrentSocialBodyInvalid
 		}
 		w.writeUint16(r.Head)
 		w.writeByte(r.NeutralState)
-		if err := writeCurrentAccountFriendDstr(&w, r.AdventureName); err != nil {
+		if err := writeCurrentAccountFriendDstr(&w, firstName); err != nil {
 			return nil, err
 		}
 		w.writeByte(r.Level)
 		w.writeByte(r.Job)
 		w.writeByte(r.Grow)
 		w.writeUint16(r.Channel)
-		if err := writeCurrentAccountFriendDstr(&w, r.CharacterName); err != nil {
+		if err := writeCurrentAccountFriendDstr(&w, secondName); err != nil {
 			return nil, err
 		}
 		if err := writeCurrentAccountFriendDstr(&w, r.Remark); err != nil {

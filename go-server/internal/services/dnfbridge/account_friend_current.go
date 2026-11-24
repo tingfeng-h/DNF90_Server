@@ -47,6 +47,10 @@ func (s *Service) handleCurrentAccountFriendCommand(session *gameSession, op uin
 			return true, s.sendGameUpperFailure(session, op, 3)
 		}
 		for _, entry := range entries {
+			if matchAccountFriendMutationTarget(entry, r.Target) {
+				target = entry.Account
+				break
+			}
 			if entry.Relation.State != accountfriend.Friend {
 				continue
 			}
@@ -183,6 +187,7 @@ func (s *Service) currentAccountFriendProjection(ctx context.Context, accountID 
 		if len(onlineChars) > 0 {
 			idx := selectAccountFriendRepresentative(entry, onlineChars)
 			row, err := currentAccountFriendRowForCharacter(entry, onlineChars[idx], onlineChannels[idx])
+			row.NeutralState = s.accountFriendDirectoryServerForChannel(onlineChannels[idx])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -420,7 +425,7 @@ func (s *Service) sendCurrentAccountFriendLists(session *gameSession, source str
 	names := make(map[string]struct{}, len(rows))
 	var bodies [][]byte
 	for _, row := range rows {
-		names[row.CharacterName] = struct{}{}
+		names[accountFriendNativeRowDeleteKey(row)] = struct{}{}
 	}
 	if len(rows) == 0 {
 		body, _ := buildCurrentAccountFriendInfoBody(nil)
@@ -459,6 +464,7 @@ func (s *Service) sendCurrentAccountFriendLists(session *gameSession, source str
 				return err
 			}
 		}
+		s.primeSameChannelAccountFriends(ctx, identity, rows)
 		for _, body := range bodies {
 			if err := s.sendGameUpperRawClassCodec(session, 1371, body, 0, true); err != nil {
 				return err
