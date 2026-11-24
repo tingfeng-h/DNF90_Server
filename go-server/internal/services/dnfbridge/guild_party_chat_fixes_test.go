@@ -168,3 +168,43 @@ func TestPartyChatNoti12BubbleSwitchAndPayload(t *testing.T) {
 		t.Fatalf("expected legacy NOTI 65, got %d", opLegacy)
 	}
 }
+
+func TestMainWhisperZeroTargetIDAndMegaphoneHyperlink(t *testing.T) {
+	// 1. Main whisper (type=1) with TargetID=0 and trailing server_group=0 must decode.
+	var w packetWriter
+	w.writeByte(1)
+	w.writeUint16(0)
+	w.writeUint32(0)
+	w.writeRawDstr([]byte("hello"))
+	w.writeRawDstr([]byte("PeerB"))
+	w.writeByte(0)
+	req, err := decodeCurrentPeerChatRequest(w.bytes())
+	if err != nil {
+		t.Fatalf("expected type=1 TargetID=0 main whisper to decode, got %v", err)
+	}
+	if req.MessageType != 1 || req.TargetID != 0 || !req.HasTrailingValue || req.TrailingValue != 0 {
+		t.Fatalf("unexpected decoded whisper: %+v", req)
+	}
+
+	// 2. Megaphone with item hyperlink (op424 mode=11, slot=7, 1 item) -> NOTI 372 layout.
+	var hw packetWriter
+	hw.writeByte(11)
+	hw.writeUint16(0)
+	hw.writeUint32(7)
+	hw.writeRawDstr([]byte("2[item]"))
+	hw.writeByte(1)
+	item := make([]byte, currentItemHyperlinkItemSize)
+	item[0] = 0xAA
+	hw.writeBytes(item)
+	hreq, err := decodeCurrentMegaphoneItemHyperlinkRequest(hw.bytes())
+	if err != nil {
+		t.Fatalf("expected megaphone hyperlink to decode, got %v", err)
+	}
+	if hreq.MessageType != 11 || hreq.Reserved != 7 || len(hreq.Items) != 1 {
+		t.Fatalf("unexpected decoded megaphone hyperlink: %+v", hreq)
+	}
+	noti := buildCurrentMegaphoneItemHyperlinkBody(11, 0, 141, 29, []byte("Peer29"), hreq.Message, hreq.Items)
+	if len(noti) < 6 || noti[0] != 11 || noti[3] != 141 {
+		t.Fatalf("unexpected NOTI 372 header: %x", noti[:6])
+	}
+}

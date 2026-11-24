@@ -28,7 +28,20 @@ func chatGameplayModule() gameplayModuleDefinition {
 		}
 		return s.handleCurrentPeerChat(p, req.Opcode, req.Body)
 	}
-	return gameplayModuleDefinition{Name: "chat", LegacyHandlers: map[uint16]gameplayHandler{17: run}, UpperHandlers: map[uint16]gameplayHandler{17: run}}
+	runHyperlink := func(s *Service, p *gameSession, req gameplayRequest) error {
+		if !requireDefaultGameplayClassification(s, p, req, "game-chat-rejected", "command_class_required") {
+			return nil
+		}
+		if megaphoneItemHyperlinkEnabled() && len(req.Body) > 0 && (req.Body[0] == 11 || req.Body[0] == 13) {
+			return s.handleCurrentMegaphoneItemHyperlink(p, req)
+		}
+		return s.handleCurrentItemHyperlinkMessage(p, req.Opcode, req.Body)
+	}
+	return gameplayModuleDefinition{
+		Name:           "chat",
+		LegacyHandlers: map[uint16]gameplayHandler{17: run, 424: runHyperlink},
+		UpperHandlers:  map[uint16]gameplayHandler{17: run, 424: runHyperlink},
+	}
 }
 
 func currentMegaphoneDefinition(catalog *pvfDungeonDropCatalog, mode byte) (inventory.MegaphoneDefinition, error) {
@@ -222,6 +235,10 @@ func (s *Service) currentMegaphonePeers(source boundGameSessionCharacter, mode b
 }
 
 func (s *Service) queueCurrentMegaphone(peer boundGameSessionCharacter, mode byte, channel int, group int64, body []byte) error {
+	return s.queueCurrentMegaphoneWithOpcode(peer, mode, channel, group, 118, body)
+}
+
+func (s *Service) queueCurrentMegaphoneWithOpcode(peer boundGameSessionCharacter, mode byte, channel int, group int64, noticeOpcode uint16, body []byte) error {
 	p := peer.session
 	if p == nil || p.loginRevoked.Load() {
 		return errInvalidGameSessionEvent
@@ -253,7 +270,7 @@ func (s *Service) queueCurrentMegaphone(peer boundGameSessionCharacter, mode byt
 			}
 			return nil
 		}
-		if err := s.sendCurrentGuildChatFrameChecked(ctx, p, 118, body, 0, validate); err != nil {
+		if err := s.sendCurrentGuildChatFrameChecked(ctx, p, noticeOpcode, body, 0, validate); err != nil {
 			s.logWarn("megaphone recipient delivery failed", "target_char_id", peer.character, "error", err)
 		}
 		return nil

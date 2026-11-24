@@ -100,7 +100,7 @@ func (s *Service) handleCurrentPeerChat(session *gameSession, typ uint16, body [
 	// Main-input 2A0C02B uses FFFF when the named character has no local
 	// scene actor. The detached whisper window uses zero instead.
 	if request.HasTrailingValue && ((isCurrentPrivateWhisperType(request.MessageType) && request.TargetID == 0) ||
-		(mainWhisper && request.TargetID == 0xffff)) {
+		(mainWhisper && (request.TargetID == 0xffff || (mainWhisperZeroTargetIDEnabled() && request.TargetID == 0)))) {
 		name, decodeErr := decodeCharacterName(request.TargetName)
 		if decodeErr != nil {
 			return s.sendGameUpperFailure(session, typ, 1)
@@ -321,7 +321,7 @@ func decodeCurrentPeerChatRequest(body []byte) (currentPeerChatRequest, error) {
 	}
 	if next != len(body) ||
 		(request.MessageType == 0x28 && (!request.HasTrailingValue || request.Unknown != 0)) ||
-		(request.TargetID == 0 && !(isCurrentPrivateWhisperType(request.MessageType) && request.HasTrailingValue)) {
+		(request.TargetID == 0 && !(isCurrentPrivateWhisperType(request.MessageType) && request.HasTrailingValue) && !allowMainWhisperZeroTargetID(request.MessageType, request.HasTrailingValue, request.TargetID)) {
 		return currentPeerChatRequest{}, errCurrentSocialBodyInvalid
 	}
 	request.Message = message
