@@ -1358,3 +1358,7 @@ func cloneCurrentPartyUDPRelayAddr(source *net.UDPAddr) *net.UDPAddr {
 	}
 	return &net.UDPAddr{IP: append(net.IP(nil), source.IP...), Port: source.Port, Zone: source.Zone}
 }
+
+// currentPartyUDPRelayLegBinding 是 currentPartyUDPRelayBinding 的可读别名：
+// 测试与外部引用用这个名字，实际字段完全一致（类型别名，零运行时影响）。
+type currentPartyUDPRelayLegBinding = currentPartyUDPRelayBinding
