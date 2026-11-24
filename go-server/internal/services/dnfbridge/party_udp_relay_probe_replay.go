@@ -305,13 +305,10 @@ func (leg *currentPartyUDPRelayLeg) memoBootstrapTarget(memo *currentPartyUDPRel
 		leg.mu.Unlock()
 		return nil, false
 	}
-	if port, ok := memo.portForTTL(leg.binding.address, leg.memoTTL); ok {
+	if target, ok := currentPartyUDPRelayMemoBootstrapAddr(leg, memo); ok {
 		leg.memoBootstraps++
 		leg.mu.Unlock()
-		return &net.UDPAddr{
-			IP:   net.IPv4(leg.binding.address[0], leg.binding.address[1], leg.binding.address[2], leg.binding.address[3]),
-			Port: int(port),
-		}, true
+		return target, true
 	}
 	leg.mu.Unlock()
 	return nil, false
@@ -375,7 +372,7 @@ func (r *currentPartyUDPRelay) rememberEndpoint(leg *currentPartyUDPRelayLeg, so
 	}
 	memo := currentPartyUDPRelayEndpointMemo{
 		valid:   true,
-		address: leg.binding.address,
+		address: currentPartyUDPRelayMemoAddressForSource(leg, source),
 		port:    uint16(source.Port),
 		seenAt:  time.Now(),
 	}
