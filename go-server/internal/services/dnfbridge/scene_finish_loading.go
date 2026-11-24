@@ -91,6 +91,7 @@ func (s *Service) sendCurrentFinishLoadingCharacterState(session *gameSession, s
 		return err
 	}
 	s.refreshCurrentAccountFriendPresence(session, "finish_loading_after_player_state")
+	s.refreshCurrentCharacterFriendPresence(session, "finish_loading_after_player_state")
 	if err := s.sendBuffSwapReapply(session, source+"_after_finish_loading_player_state"); err != nil {
 		return err
 	}

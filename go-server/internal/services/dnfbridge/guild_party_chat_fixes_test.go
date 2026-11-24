@@ -108,3 +108,42 @@ func TestPartyCrossRoomTownProjectionSwitches(t *testing.T) {
 		t.Fatal("legacy env should disable seria actor no-op23 projection")
 	}
 }
+
+func TestCharacterFriendRealtimePresenceSwitchAndWatchers(t *testing.T) {
+	if !characterFriendRealtimePresenceEnabled() {
+		t.Fatal("character friend realtime presence should be enabled by default")
+	}
+	t.Setenv(characterFriendRealtimePresenceEnv, "legacy")
+	if characterFriendRealtimePresenceEnabled() {
+		t.Fatal("legacy env should disable character friend realtime presence")
+	}
+	t.Setenv(characterFriendRealtimePresenceEnv, "")
+
+	s := &Service{
+		options:      options{currentClientVersion: "official-24.9"},
+		gameSessions: map[uint16]*gameSession{},
+	}
+	viewer := &gameSession{selectedCharacterID: 101, characterGeneration: 1}
+	s.gameSessions[101] = viewer
+	identity := boundGameSessionCharacter{session: viewer, character: 101, generation: 1}
+	s.recordCurrentCharacterFriendWatchersAndPrime(context.Background(), viewer, identity, []dnfrepo.CharacterRecord{
+		{CharacterID: "202", AccountID: "acc2", Name: "PeerB"},
+	}, "test")
+	hub := s.characterFriendWatcherHub(false)
+	if hub == nil {
+		t.Fatal("expected watcher hub to be initialized")
+	}
+	hub.mu.Lock()
+	_, watching := hub.byTarget[202][viewer]
+	hub.mu.Unlock()
+	if !watching {
+		t.Fatal("expected viewer to be registered as watcher of character 202")
+	}
+	s.unregisterCurrentCharacterFriendWatcher(viewer)
+	hub.mu.Lock()
+	remaining := len(hub.byTarget[202])
+	hub.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("expected watcher cleanup after unregister, got %d", remaining)
+	}
+}

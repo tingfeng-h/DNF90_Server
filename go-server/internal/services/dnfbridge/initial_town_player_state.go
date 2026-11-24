@@ -393,6 +393,7 @@ func (s *Service) sendCurrentTownPlayerStateLocked(
 		return err
 	}
 	s.refreshCurrentAccountFriendPresence(session, source+"_after_adventure_actor_before_scene_commit")
+	s.refreshCurrentCharacterFriendPresence(session, source+"_after_adventure_actor_before_scene_commit")
 	if err := s.sendSelectedCurrentEpicProductionInfo(
 		session,
 		source+"_after_actor_bound_before_scene_commit",

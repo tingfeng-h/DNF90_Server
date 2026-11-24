@@ -160,6 +160,7 @@ func (s *Service) sendCurrentCharacterFriendList(session *gameSession, source st
 	if !s.boundGameSessionCharacterCurrent(identity) {
 		return nil
 	}
+	s.recordCurrentCharacterFriendWatchersAndPrime(ctx, session, identity, rows, source)
 	s.logGameEvent(session, "game-character-friend-list-send", "source", source, "count", len(rows), "body_len", len(body))
 	return s.sendGameUpperRawClassCodec(session, currentCharacterFriendListOpcode, body, 0, true)
 }

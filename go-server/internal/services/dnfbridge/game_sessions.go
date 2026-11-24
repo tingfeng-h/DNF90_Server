@@ -55,10 +55,12 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 	if s.gameSessions == nil {
 		s.gameSessions = make(map[uint16]*gameSession)
 	}
+	var switchedOutCharID uint16
 	if oldID := session.selectedCharacterID; oldID != 0 && oldID != charID {
 		if s.gameSessions[oldID] == session {
 			guildObservations = append(guildObservations, s.currentGuildPresenceObservationLocked(session, guildClock.Now()))
 			delete(s.gameSessions, oldID)
+			switchedOutCharID = oldID
 		}
 	}
 	previous := s.gameSessions[charID]
@@ -106,6 +108,10 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 			storeRuntimePartyState(previous, alignedcmd.PartyState{})
 			storeRuntimePartyState(session, alignedcmd.PartyState{})
 		}
+	}
+	if switchedOutCharID != 0 {
+		s.unregisterCurrentCharacterFriendWatcher(session)
+		s.refreshCurrentCharacterFriendPresenceForCharacterID(session, switchedOutCharID, "character_switched")
 	}
 	s.restoreCurrentRaidPresence(session)
 }
@@ -237,8 +243,10 @@ func (s *Service) unbindGameSession(session *gameSession) {
 	s.lockCurrentCharacterBindingMutation(session, 0)
 	s.clearCurrentPeerProfileReferencesLocked(session)
 	presenceChanged := false
+	var unboundCharID uint16
 	guildObservation := s.currentGuildPresenceObservationLocked(session, guildClock.Now())
 	if session.selectedCharacterID != 0 && s.gameSessions[session.selectedCharacterID] == session {
+		unboundCharID = session.selectedCharacterID
 		delete(s.gameSessions, session.selectedCharacterID)
 		presenceChanged = true
 	}
@@ -246,8 +254,10 @@ func (s *Service) unbindGameSession(session *gameSession) {
 		advanceGameSessionCharacterGeneration(session)
 	}
 	s.mu.Unlock()
+	s.unregisterCurrentCharacterFriendWatcher(session)
 	if presenceChanged {
 		s.refreshCurrentAccountFriendPresence(session, "offline")
+		s.refreshCurrentCharacterFriendPresenceForCharacterID(session, unboundCharID, "offline")
 		s.persistCurrentGuildPresence(guildObservation)
 	}
 }
