@@ -3,7 +3,9 @@ package dnfbridge
 import (
 	"bytes"
 	"context"
+	"net"
 	"testing"
+	"time"
 
 	"longheng.io/server/internal/modules/dnf/dnfenum"
 	"longheng.io/server/internal/modules/dnf/party"
@@ -206,5 +208,46 @@ func TestMainWhisperZeroTargetIDAndMegaphoneHyperlink(t *testing.T) {
 	noti := buildCurrentMegaphoneItemHyperlinkBody(11, 0, 141, 29, []byte("Peer29"), hreq.Message, hreq.Items)
 	if len(noti) < 6 || noti[0] != 11 || noti[3] != 141 {
 		t.Fatalf("unexpected NOTI 372 header: %x", noti[:6])
+	}
+}
+
+func TestPartyUDPRelayIPRoamingPolicy(t *testing.T) {
+	now := time.Now()
+	leg := &currentPartyUDPRelayLeg{
+		binding: currentPartyUDPRelayLegBinding{address: [4]byte{192, 0, 2, 10}},
+	}
+	tcpSrc := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 5000}
+	altSrc := &net.UDPAddr{IP: net.IPv4(198, 51, 100, 20), Port: 6000}
+	roamSrc := &net.UDPAddr{IP: net.IPv4(203, 0, 113, 30), Port: 7000}
+
+	// Default strict mode: TCP IP allowed, foreign IP rejected.
+	if !currentPartyUDPRelaySourceAllowed(leg, tcpSrc, now) {
+		t.Fatal("expected TCP IP to be allowed in strict mode")
+	}
+	if currentPartyUDPRelaySourceAllowed(leg, altSrc, now) {
+		t.Fatal("expected foreign IP to be rejected in strict mode")
+	}
+
+	// Enable roam mode: first packet from split egress IP is allowed.
+	t.Setenv(partyUDPRelayIPRoamingEnv, "roam")
+	t.Setenv(partyUDPRelayRoamIdleMsEnv, "2000")
+	if !currentPartyUDPRelaySourceAllowed(leg, altSrc, now) {
+		t.Fatal("expected first-packet split IP to be allowed in roam mode")
+	}
+
+	// Once learned and actively receiving, a third-party IP must be rejected (anti-hijack).
+	leg.learnedEndpoint = altSrc
+	leg.fastTarget.Store(altSrc)
+	leg.fastLastRecvUnixNano.Store(now.UnixNano())
+	if !currentPartyUDPRelaySourceAllowed(leg, altSrc, now.Add(500*time.Millisecond)) {
+		t.Fatal("expected active learned IP to stay allowed")
+	}
+	if currentPartyUDPRelaySourceAllowed(leg, roamSrc, now.Add(500*time.Millisecond)) {
+		t.Fatal("expected third-party IP to be rejected while learned IP is active")
+	}
+
+	// After idle threshold (>=2s), roaming to the new egress IP is allowed.
+	if !currentPartyUDPRelaySourceAllowed(leg, roamSrc, now.Add(2500*time.Millisecond)) {
+		t.Fatal("expected roaming to new IP after idle threshold")
 	}
 }

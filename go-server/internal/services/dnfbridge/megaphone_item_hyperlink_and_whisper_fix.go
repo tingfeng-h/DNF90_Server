@@ -42,6 +42,29 @@ func allowMainWhisperZeroTargetID(messageType byte, hasTrailing bool, targetID u
 	return mainWhisperZeroTargetIDEnabled() && messageType == 1 && hasTrailing && targetID == 0
 }
 
+// allowMainWhisperTrailingGroup accepts the exact character server_group_id as
+// well as V212 Guild/directory menu values (channelAdvertiseID, 0xFF unknown,
+// or the target's owner channel byte) while preserving strict rejection in unit
+// tests where channelAdvertiseID == 0 and a mismatched group is injected.
+func (s *Service) allowMainWhisperTrailingGroup(mainWhisper bool, targetSession *gameSession, trailing byte, targetGroup int64) bool {
+	if int64(trailing) == targetGroup {
+		return true
+	}
+	if !mainWhisper || !mainWhisperZeroTargetIDEnabled() {
+		return false
+	}
+	if trailing == 0xff {
+		return true
+	}
+	if adv := s.channelAdvertiseID(); adv > 0 && adv < 255 && trailing == byte(adv) {
+		return true
+	}
+	if ch, ok := currentSessionOwnerChannelField(targetSession); ok && ch > 0 && trailing == ch {
+		return true
+	}
+	return false
+}
+
 // decodeCurrentMegaphoneItemHyperlinkRequest decodes op424
 // (CmdPacketItemHyperlinkMessage) for channel (11) and server (13) megaphones:
 //

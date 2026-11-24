@@ -163,8 +163,9 @@ func (s *Service) handleCurrentPeerChat(session *gameSession, typ uint16, body [
 		// repository only resolves its own group; never alias foreign names.
 		sourceGroup, targetGroup := source.Stats["server_group_id"], target.Stats["server_group_id"]
 		if !privateWhisper || !request.HasTrailingValue || sourceGroup < 0 || sourceGroup >= 250 ||
-			targetGroup != sourceGroup || int64(request.TrailingValue) != targetGroup {
+			targetGroup != sourceGroup || !s.allowMainWhisperTrailingGroup(mainWhisper, targetSession, request.TrailingValue, targetGroup) {
 			s.logGameEvent(session, "game-peer-chat-request-rejected", "message_type", request.MessageType,
+				"target_id", request.TargetID, "trailing_value", request.TrailingValue, "target_group", targetGroup,
 				"reason", "whisper_character_group_mismatch")
 			return s.sendGameUpperFailure(session, typ, 1)
 		}

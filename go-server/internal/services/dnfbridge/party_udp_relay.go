@@ -987,7 +987,7 @@ func (r *currentPartyUDPRelay) readLoop(leg *currentPartyUDPRelayLeg) {
 			r.traceRelayDatagram(leg, source, n, nil, "dropped_empty_payload")
 			continue
 		}
-		if !currentPartyUDPRelaySourceMatches(source, leg.binding.address) {
+		if !currentPartyUDPRelaySourceAllowed(leg, source, time.Now()) {
 			if count, first := leg.noteDrop(relayLegDropSourceMismatch); first {
 				r.logDrop(leg, relayLegDropSourceMismatch, count, source,
 					"expected", formatCurrentPartyUDPRelayIPv4(leg.binding.address),
