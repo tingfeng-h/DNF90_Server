@@ -19,7 +19,13 @@ type RuntimePartyManager struct {
 	nextID  uint16
 	parties map[uint16]*runtimeParty
 	byUser  map[uint16]uint16
-	invites map[uint16]runtimePartyInvite
+	invites map[runtimePartyInviteKey]runtimePartyInvite
+}
+
+type runtimePartyInviteKey struct {
+	invitee uint16
+	inviter uint16
+	mode    byte
 }
 
 type RuntimePartyMember struct {
@@ -85,7 +91,7 @@ func NewRuntimePartyManager() *RuntimePartyManager {
 		nextID:  1,
 		parties: make(map[uint16]*runtimeParty),
 		byUser:  make(map[uint16]uint16),
-		invites: make(map[uint16]runtimePartyInvite),
+		invites: make(map[runtimePartyInviteKey]runtimePartyInvite),
 	}
 }
 
@@ -438,7 +444,8 @@ func (m *RuntimePartyManager) RecordInvite(invitee uint16, inviteeGeneration uin
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.invites[invitee] = runtimePartyInvite{invitee: invitee, inviteeGeneration: inviteeGeneration, inviter: inviter, inviterGeneration: inviterGeneration, partyID: partyID, mode: mode,
+	key := runtimePartyInviteKey{invitee: invitee, inviter: inviter, mode: mode}
+	m.invites[key] = runtimePartyInvite{invitee: invitee, inviteeGeneration: inviteeGeneration, inviter: inviter, inviterGeneration: inviterGeneration, partyID: partyID, mode: mode,
 		request: RuntimePeerRequest{PartyID: partyID, JoinerID: invitee, AnchorID: inviter}}
 	return true
 }
@@ -458,8 +465,10 @@ func (m *RuntimePartyManager) RecordOnlinePeerRequest(recipient uint16, recipien
 			delete(m.invites, id)
 		}
 	}
-	if invite, ok := m.invites[recipient]; ok && invite.mode == 1 {
-		return RuntimePeerRequest{}, false
+	for _, invite := range m.invites {
+		if invite.invitee == recipient && invite.mode == 1 {
+			return RuntimePeerRequest{}, false
+		}
 	}
 	if mode == 1 {
 		// An outstanding trade invitation belongs to both participants; a
@@ -500,7 +509,7 @@ func (m *RuntimePartyManager) RecordOnlinePeerRequest(recipient uint16, recipien
 		// bounds an abandoned prompt without scheduling per-player timers.
 		invite.expiresAt = now.Add(time.Minute)
 	}
-	m.invites[recipient] = invite
+	m.invites[runtimePartyInviteKey{invitee: recipient, inviter: requester, mode: mode}] = invite
 	return request, true
 }
 
@@ -515,11 +524,12 @@ func (m *RuntimePartyManager) ConsumePeerRequest(invitee uint16, inviteeGenerati
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	invite, ok := m.invites[invitee]
+	key := runtimePartyInviteKey{invitee: invitee, inviter: inviter, mode: mode}
+	invite, ok := m.invites[key]
 	if !ok || invite.inviteeGeneration != inviteeGeneration || invite.inviter != inviter || invite.inviterGeneration != inviterGeneration || invite.mode != mode {
 		return RuntimePeerRequest{}, false
 	}
-	delete(m.invites, invitee)
+	delete(m.invites, key)
 	if !invite.expiresAt.IsZero() && !time.Now().Before(invite.expiresAt) {
 		return RuntimePeerRequest{}, false
 	}
@@ -654,10 +664,10 @@ func (m *RuntimePartyManager) partyMemberLocked(userID uint16) (*runtimeParty, *
 }
 
 func (m *RuntimePartyManager) clearInvitesForLocked(userID uint16, generation uint64) {
-	for invitee, invite := range m.invites {
-		if (invitee == userID && (generation == 0 || invite.inviteeGeneration == generation)) ||
+	for key, invite := range m.invites {
+		if (invite.invitee == userID && (generation == 0 || invite.inviteeGeneration == generation)) ||
 			(invite.inviter == userID && (generation == 0 || invite.inviterGeneration == generation)) {
-			delete(m.invites, invitee)
+			delete(m.invites, key)
 		}
 	}
 }
