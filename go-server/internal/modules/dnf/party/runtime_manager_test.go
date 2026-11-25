@@ -6,7 +6,9 @@ import (
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 )
 
-func TestRuntimePartyManagerLeaderLeaveRebuildsFreshPartyGeneration(t *testing.T) {
+// Graduated production policy: leader leave transfers leadership within the same
+// PartyID so surviving members keep fixed slots and UDP relay ports intact.
+func TestRuntimePartyManagerLeaderLeaveKeepsSamePartyID(t *testing.T) {
 	manager := NewRuntimePartyManager()
 	leader := testRuntimePartyMember(101, 1)
 	created := manager.Create(leader, alignedcmd.PartyState{MaxMembers: 4})
@@ -18,17 +20,17 @@ func TestRuntimePartyManagerLeaderLeaveRebuildsFreshPartyGeneration(t *testing.T
 		t.Fatalf("join result = %+v", joined)
 	}
 	left := manager.Leave(101, 1)
-	if !left.OK || !left.LeaderMoved || left.Retired == nil {
+	if !left.OK || !left.LeaderMoved || left.Retired != nil {
 		t.Fatalf("leader leave result = %+v", left)
 	}
-	if left.Retired.ID != created.Party.ID || left.Party.ID == created.Party.ID {
-		t.Fatalf("party generations old=%d retired=%d new=%d", created.Party.ID, left.Retired.ID, left.Party.ID)
+	if left.Party.ID != created.Party.ID {
+		t.Fatalf("party id must be preserved: old=%d new=%d", created.Party.ID, left.Party.ID)
 	}
 	if left.Party.Leader != 202 || len(left.Party.Members) != 1 || left.Party.Members[0].Slot != 1 {
-		t.Fatalf("rebuilt party = %+v", left.Party)
+		t.Fatalf("retained party = %+v", left.Party)
 	}
-	if _, found := manager.SnapshotByID(created.Party.ID); found {
-		t.Fatal("retired party remained addressable")
+	if _, found := manager.SnapshotByID(created.Party.ID); !found {
+		t.Fatal("same-id party must stay addressable")
 	}
 	if current, found := manager.SnapshotByUser(202, 1); !found || current.ID != left.Party.ID {
 		t.Fatalf("survivor lookup = %+v found=%v", current, found)
