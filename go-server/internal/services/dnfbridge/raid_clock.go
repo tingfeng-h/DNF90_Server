@@ -4,11 +4,9 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"reflect"
 	"time"
 
 	"longheng.io/server/internal/modules/dnf/raid"
-	"longheng.io/server/internal/modules/dnf/raid/fiendwar"
 )
 
 const currentRaidClockName = "raid:active-instances"
@@ -150,19 +148,18 @@ func (s *Service) advanceCurrentRaidClocks(now time.Time) ([]runtimeRaidState, [
 				errors = append(errors, err)
 				continue
 			}
-			changed := currentFiendWarProjectionChanged(b.FiendWar, next)
+			changed := !b.FiendWar.SameProjection(next)
 			b.FiendWar = next
-			syncCurrentFiendWarDungeons(b)
-			if next.Failed {
-				b.FiendWarEndedAt = now
-				b.TimedOut = true
-				if err := s.freezeCurrentRaidFailureRefundLocked(*state, now); err != nil {
-					errors = append(errors, fmt.Errorf("fiendwar failure refund entitlement: %w", err))
-				}
-				changed = true
-			}
 			if changed {
+				syncCurrentFiendWarDungeons(b)
 				b.ProgressVersion++
+				if next.Failed {
+					b.FiendWarEndedAt = now
+					b.TimedOut = true
+					if err := s.freezeCurrentRaidFailureRefundLocked(*state, now); err != nil {
+						errors = append(errors, fmt.Errorf("fiendwar failure refund entitlement: %w", err))
+					}
+				}
 				states = append(states, cloneRuntimeRaidState(*state))
 			}
 			continue
@@ -186,13 +183,4 @@ func (s *Service) advanceCurrentRaidClocks(now time.Time) ([]runtimeRaidState, [
 		}
 	}
 	return states, errors
-}
-
-// currentFiendWarProjectionChanged 判定超时空战场投影是否真的变化：
-// 只有变化才递增 ProgressVersion 并广播，避免每秒对全团深拷贝 + 发包。
-func currentFiendWarProjectionChanged(before, after *fiendwar.FiendWarBattle) bool {
-	if before == nil || after == nil {
-		return before != after
-	}
-	return !reflect.DeepEqual(before, after)
 }

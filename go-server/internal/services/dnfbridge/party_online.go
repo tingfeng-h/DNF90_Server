@@ -1890,7 +1890,12 @@ func (s *Service) broadcastRuntimePartyMemberRemoved(previousState, nextState al
 			continue
 		}
 		if err := s.sendRuntimePartyMemberRemoved(session, removedID, nextState); err != nil {
-			return err
+			s.logGameEvent(session, "game-party-member-removed-peer-failed",
+				"party_id", previousState.PartyID,
+				"removed_char_id", removedID,
+				"receiver_char_id", member.UserID,
+				"error", err)
+			continue
 		}
 		if removedKey != 0 {
 			// owner 记录链统一由 partyRecordOwnerChain 给出：副本作用域优先。
@@ -1898,7 +1903,13 @@ func (s *Service) broadcastRuntimePartyMemberRemoved(previousState, nextState al
 			for _, owner := range owners {
 				body := buildCurrentSceneOp9ActorRemovalBodyInContext(removedKey, owner, route)
 				if err := s.sendGameUpperRawClass(session, uint16(dnfenum.CmdPacketRecoverStamina), body, 0); err != nil {
-					return err
+					s.logGameEvent(session, "game-party-member-removed-kind3-peer-failed",
+						"party_id", previousState.PartyID,
+						"removed_char_id", removedID,
+						"receiver_char_id", member.UserID,
+						"owner", owner,
+						"error", err)
+					break
 				}
 			}
 		}
@@ -2470,7 +2481,12 @@ func (s *Service) broadcastCurrentPartyActorProjection(actor *gameSession, state
 			continue
 		}
 		if _, err := s.sendCurrentPartyActorFrameProjection(peer.Session, actor, state, source+"_to_area_peer", batch); err != nil {
-			return err
+			s.logGameEvent(peer.Session, "game-party-actor-projection-peer-failed",
+				"party_id", state.PartyID,
+				"actor_char_id", actor.selectedCharacterID,
+				"receiver_char_id", peer.Session.selectedCharacterID,
+				"source", source+"_to_area_peer",
+				"error", err)
 		}
 	}
 	return nil

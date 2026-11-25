@@ -74,6 +74,7 @@ func (s *Service) publishRuntimePartySnapshot(snapshot party.RuntimePartySnapsho
 			identity.session.lastPublishedPartyLeader = snapshot.Leader
 			identity.session.lastPublishedPartyID = int(snapshot.ID)
 		}
+		s.invalidateTownMode0Character(member.UserID)
 	}
 	return snapshot.StateFor(snapshot.Leader)
 }
@@ -108,6 +109,7 @@ func (s *Service) clearRuntimePartyProjection(userID uint16, generation uint64) 
 		}
 	}
 	s.clearRuntimePartyProjectionForSessions(identity, 0)
+	s.invalidateTownMode0Character(userID)
 }
 
 // clearRuntimePartyProjectionForSnapshot is the one-member counterpart used
@@ -124,6 +126,7 @@ func (s *Service) clearRuntimePartyProjectionForSnapshot(userID uint16, snapshot
 		return
 	}
 	s.clearRuntimePartyProjectionForSessions(identity, snapshotID)
+	s.invalidateTownMode0Character(userID)
 }
 
 // clearRuntimePartyProjectionForSessions clears the directory owner and every
@@ -761,7 +764,11 @@ func (s *Service) sendManagedRuntimePartySnapshots(state alignedcmd.PartyState) 
 			continue
 		}
 		if err := s.sendRuntimePartySnapshot(identity.session, snapshot.StateFor(member.UserID)); err != nil {
-			return err
+			s.logGameEvent(identity.session, "game-party-snapshot-peer-failed",
+				"party_id", snapshot.ID,
+				"receiver_char_id", member.UserID,
+				"leader_char_id", snapshot.Leader,
+				"error", err)
 		}
 	}
 	// 上面这一轮（op153/op11/op9）里 op9 只描述"收包人自己"；队友那条记录在城镇靠

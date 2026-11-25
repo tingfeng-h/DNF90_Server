@@ -47,6 +47,10 @@ func (s *Service) bindGameSessionCharacter(session *gameSession, charID uint16) 
 		s.stopCurrentSpendTimeClock(session, "selected_character_changed")
 		s.stopCurrentPetGrowthClock(session, "selected_character_changed")
 		s.stopCurrentDailyDeleteClock(session)
+		s.invalidateTownMode0Character(oldID)
+	}
+	if charID != 0 {
+		s.invalidateTownMode0Character(charID)
 	}
 	resident, residentParty, unlock, current := s.lockCurrentPartyBinding(session, charID)
 	if !current {
@@ -240,6 +244,9 @@ func (s *Service) unbindGameSession(session *gameSession) {
 	s.stopCurrentDailyDeleteClock(session)
 	s.stopCurrentSpendTimeClock(session, "game_session_unbound_or_disconnected")
 	s.stopAvatarAppearanceCoalesce(session, "game_session_unbound_or_disconnected")
+	if session.selectedCharacterID != 0 {
+		s.invalidateTownMode0Character(session.selectedCharacterID)
+	}
 	s.lockCurrentCharacterBindingMutation(session, 0)
 	s.clearCurrentPeerProfileReferencesLocked(session)
 	presenceChanged := false
