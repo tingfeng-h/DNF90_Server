@@ -80,7 +80,9 @@ func TestPartyFrameRosterDoesNotReadUnserializedEquipment(t *testing.T) {
 					t.Fatalf("unexpected roster frames: %v", frameIDs(frames))
 				}
 				row := original[actor.selectedCharacterID]
-				want := buildCurrentSceneOp9ActorPartyDisplayBodyForProfile(currentSceneActorObjectKey(actor.selectedCharacterID), row, true, row.Name, currentSceneObjectContext, currentClientSelectedChannelID(receiver), members, currentSceneOp9PartyLeaderSlot(members, f.state.UserID), false, f.service.currentSceneActorRoute())
+				leaderSlot := currentSceneOp9PartyLeaderSlot(members, f.state.UserID)
+				displayName := resolveCurrentPartyDisplayName(f.state, members, leaderSlot, row.Name)
+				want := buildCurrentSceneOp9ActorPartyDisplayBodyForProfileWithPartyMax(currentSceneActorObjectKey(actor.selectedCharacterID), row, true, displayName, currentSceneObjectContext, currentClientSelectedChannelID(receiver), members, leaderSlot, effectivePartyDisplayMaxMembers(f.state), false, f.service.currentSceneActorRoute())
 				if !bytes.Equal(frames[0].body, want) {
 					t.Fatalf("member table bytes changed for %d players", count)
 				}

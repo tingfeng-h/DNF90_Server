@@ -88,6 +88,10 @@ func TestWeddingGuildInvitationPrimesSilentRealMemberBeforeRoster(t *testing.T) 
 	for _, offline := range []bool{false, true} {
 		f, repos := guildMemberProfileFixture(t)
 		s := f.service
+		// Align actor to viewer's channel to match same-channel guild profile guard.
+		viewerChannel := currentTownPresenceChannelID(f.target)
+		f.actor.channel.ID = viewerChannel
+		f.actor.connectionTownActorOwnerChannel = byte(viewerChannel)
 		ctx := context.Background()
 		// The shared profile fixture replaces Character with a fake store.
 		// Guild read views now own their character snapshot; bind both readers

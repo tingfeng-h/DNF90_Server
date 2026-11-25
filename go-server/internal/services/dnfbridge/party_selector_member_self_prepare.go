@@ -38,11 +38,11 @@ import (
 // # 开关
 //
 //	`DNFBRIDGE_PARTY_SELECTOR_MEMBER_SELF_PREPARE`
-//	  - `off`（默认，零值）= 逐字节回到改动前：只记 `game-party-enter-select-non-leader-initiated`，
-//	    零发包；
-//	  - `on` / `1` / `true` / `yes` = 打开上面的自补转换。
+//	  - 默认（未设置 / `on` / `1` / `true` / `yes`）= 打开上面的自补转换（线上已验证默认开启）；
+//	  - `off` / `0` / `false` / `no` / `legacy` = 逐字节回到改动前：只记
+//	    `game-party-enter-select-non-leader-initiated`，零发包。
 //
-// 回退：把开关设 `off`（或删掉该行）并重启即可逐字节回到改动前。
+// 回退：把开关设 `off` 并重启即可逐字节回到改动前。
 const partySelectorMemberSelfPrepareEnv = "DNFBRIDGE_PARTY_SELECTOR_MEMBER_SELF_PREPARE"
 
 func partySelectorMemberSelfPrepareEnabled() bool {

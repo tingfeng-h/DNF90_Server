@@ -35,12 +35,6 @@ func TestNamedChatSenderServerGroupUsesCharacterServerGroupNotChannel(t *testing
 		t.Fatalf("guild chat notice=%x want=%x", packet.Body, want.Bytes())
 	}
 
-	// Verify explicit rollback switch restores legacy channel byte.
-	t.Setenv(namedChatServerGroupEnv, "legacy")
-	got, ok := currentNamedChatSenderServerGroup(peers[29], dnfrepo.CharacterRecord{Stats: map[string]int64{"server_group_id": 0}})
-	if !ok || got != 10 {
-		t.Fatalf("legacy mode got=%d ok=%v want=10", got, ok)
-	}
 }
 
 func TestGuildMemberProfileChannelGuardBlocksCrossChannelByDefault(t *testing.T) {
@@ -103,13 +97,8 @@ func TestPartyCrossRoomTownProjectionSwitches(t *testing.T) {
 
 func TestCharacterFriendRealtimePresenceSwitchAndWatchers(t *testing.T) {
 	if !characterFriendRealtimePresenceEnabled() {
-		t.Fatal("character friend realtime presence should be enabled by default")
+		t.Fatal("character friend realtime presence must stay enabled")
 	}
-	t.Setenv(characterFriendRealtimePresenceEnv, "legacy")
-	if characterFriendRealtimePresenceEnabled() {
-		t.Fatal("legacy env should disable character friend realtime presence")
-	}
-	t.Setenv(characterFriendRealtimePresenceEnv, "")
 
 	s := &Service{
 		options:      options{currentClientVersion: "official-24.9"},

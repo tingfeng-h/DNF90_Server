@@ -2,24 +2,12 @@ package dnfbridge
 
 import (
 	"encoding/binary"
-	"os"
-	"strings"
 )
 
-const mode1GuardianGemLateRawDEnv = "DNFBRIDGE_MODE1_GUARDIAN_GEM_LATE_RAW_D"
-
-// mode1GuardianGemLateRawDEnabled controls projecting a worn guild medal's
-// 4 guardian-gem socket words (raw 0x77 offsets 101..109) into mode1/mode8
-// equipment create row `lateRawD` (V212 0x0202A917 -> 0x0243599F/0x024359A8
-// writing state+0xAF..0xB6). Enabled by default; set off/0/false/legacy to
-// roll back.
+// Graduated production policy: always project a worn guild medal's 4 guardian-gem
+// socket words (raw 0x77 offsets 101..109) into mode1/mode8 `lateRawD`.
 func mode1GuardianGemLateRawDEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(mode1GuardianGemLateRawDEnv))) {
-	case "0", "off", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // currentMode1EquipmentGuardianGemRawDFromItem projects the 8-byte guardian gem

@@ -1,23 +1,13 @@
 package dnfbridge
 
 import (
-	"os"
-	"strings"
-
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
-const namedChatServerGroupEnv = "DNFBRIDGE_NAMED_CHAT_SERVER_GROUP"
-
-// currentNamedChatServerGroupLegacyEnabled returns true only when the operator
-// explicitly opts back into the historical channel-byte wire behavior.
+// Graduated production policy: named chat packets (NOTI 65 / NOTI 371) always
+// emit the sender's server_group_id rather than the connection channel byte.
 func currentNamedChatServerGroupLegacyEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(namedChatServerGroupEnv))) {
-	case "legacy", "channel", "off", "0", "false":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 // NOTI65 (VA 0x0201B510) and NOTI371 (VA 0x02A04520) store the single u8 field

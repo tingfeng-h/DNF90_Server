@@ -13,18 +13,13 @@ import (
 )
 
 const (
-	megaphoneItemHyperlinkEnv   = "DNFBRIDGE_MEGAPHONE_ITEM_HYPERLINK"
 	mainWhisperZeroTargetIDEnv  = "DNFBRIDGE_MAIN_WHISPER_ZERO_TARGET_ID"
 	currentMegaphoneHyperlinkOp = uint16(372) // V212 0x02A014D0 (NOTI 372)
 )
 
+// Graduated production policy: megaphone item hyperlinks (NOTI 372) are always enabled.
 func megaphoneItemHyperlinkEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(megaphoneItemHyperlinkEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 func mainWhisperZeroTargetIDEnabled() bool {

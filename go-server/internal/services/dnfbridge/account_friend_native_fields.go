@@ -2,36 +2,16 @@ package dnfbridge
 
 import (
 	"context"
-	"os"
 	"strconv"
-	"strings"
 
 	"longheng.io/server/internal/modules/dnf/accountfriend"
 	repo "longheng.io/server/internal/modules/dnf/repository"
 )
 
-const (
-	// DNFBRIDGE_ACCOUNT_FRIEND_NATIVE_FIELDS fixes the three NOTI1371 (op1371)
-	// field mismatches verified against V212 DNF.exe (0x0201FE50 / 0x010BE12C /
-	// 0x010BE8DC):
-	//   1. +0x04 (NeutralState) is directory_server (channelAdvertiseID, e.g. 1),
-	//      passed with +0x52 (channel) to 0x01B378F0 to render the channel name
-	//      (writing 0 caused "未知").
-	//   2. +0x0C (1st DSTR, cap 30) is CharacterName (rendered as "Lv.90 %s",
-	//      used for right-click lookup 0x0296D810 and cross-channel op804 follow).
-	//   3. +0x54 (2nd DSTR, cap 17) is AdventureName (rendered as "(%s)", used
-	//      as the primary key for op1438 delete, op1440 note, and NOTI1373).
-	// Default: on; set off/0/false/no/legacy to restore the legacy wire layout.
-	accountFriendNativeFieldsEnv = "DNFBRIDGE_ACCOUNT_FRIEND_NATIVE_FIELDS"
-)
-
+// Graduated production policy: NOTI1371 account friend rows always use the
+// V212 native fields (directory_server + CharacterName + AdventureName).
 func accountFriendNativeFieldsEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(accountFriendNativeFieldsEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 func (s *Service) accountFriendDirectoryServerForChannel(channel uint16) byte {

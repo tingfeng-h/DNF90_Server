@@ -211,7 +211,11 @@ func (s *Service) detachRuntimePartySession(session *gameSession, source string)
 		source == "selected_character_changed"
 	identity, bound := s.boundGameSessionCharacterSnapshot(session)
 	if !bound && explicitClientExit {
-		identity, bound = s.onlineGameSessionCharacterSnapshot(session.selectedCharacterID)
+		// Only fall back when the online directory still points to this same session;
+		// never let a retired socket detach a newer replacement session for the same character.
+		if fallback, ok := s.onlineGameSessionCharacterSnapshot(session.selectedCharacterID); ok && fallback.session == session {
+			identity, bound = fallback, true
+		}
 	}
 	if !bound {
 		return

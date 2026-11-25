@@ -3,26 +3,19 @@ package dnfbridge
 import (
 	"context"
 	"errors"
-	"os"
 	"strconv"
-	"strings"
 
 	dnfguild "longheng.io/server/internal/modules/dnf/guild"
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
 const (
-	guildRosterSameChannelPrimeEnv   = "DNFBRIDGE_GUILD_ROSTER_SAME_CHANNEL_PRIME"
 	guildRosterSameChannelPrimeLimit = 64
 )
 
+// Graduated production policy: same-channel guild roster silent mode8 prime is always enabled.
 func guildRosterSameChannelPrimeEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(guildRosterSameChannelPrimeEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // primeSingleSameChannelGuildMode8 builds and sends one silent mode8 cache

@@ -118,6 +118,8 @@ func TestPartySelectorFollowersPreparedBeforeLeaderOpen(t *testing.T) {
 	}
 }
 
+// Concurrency contract (PR #137 error isolation): a broken follower TCP
+// connection must not fail or disconnect the healthy party leader.
 func TestPartySelectorFollowerWriteFailureDoesNotOpenLeader(t *testing.T) {
 	for _, failed := range []int{1, 3} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
@@ -127,17 +129,27 @@ func TestPartySelectorFollowerWriteFailureDoesNotOpenLeader(t *testing.T) {
 			for _, c := range conns {
 				c.write.Reset()
 			}
-			if err := s.sendEnterSelectDungeonState(players[0], "selector_order_failure", false, true); !errors.Is(err, failure) {
-				t.Fatalf("error=%v", err)
+			if err := s.sendEnterSelectDungeonState(players[0], "selector_order_failure", false, true); err != nil {
+				t.Fatalf("follower write failure must be isolated from healthy leader, got error=%v", err)
 			}
-			assertLeaderSelectorFailureAck(t, conns[0])
-			if players[0].enterSelectDungeonContextSent {
-				t.Fatal("leader sent op27 context despite follower failure")
+			if !players[0].enterSelectDungeonContextSent {
+				t.Fatal("healthy leader must still receive op27 context when a single follower write fails")
+			}
+			for idx := 1; idx < len(players); idx++ {
+				if idx == failed {
+					continue
+				}
+				if conns[idx].write.Len() == 0 {
+					t.Fatalf("healthy follower %d received no selector packets after follower %d failed", idx, failed)
+				}
 			}
 		})
 	}
 }
 
+// Concurrency contract (PR #137 error isolation): when both a follower and the
+// leader fail to write, follower failure is isolated while the leader's own
+// write error is still returned.
 func TestPartySelectorFollowerWriteAndReplyFailureJoinErrors(t *testing.T) {
 	s, players, conns := selectorOrderFourPlayers(t)
 	followerFailure := errors.New("selector follower write failed")
@@ -148,11 +160,11 @@ func TestPartySelectorFollowerWriteAndReplyFailureJoinErrors(t *testing.T) {
 		c.write.Reset()
 	}
 	err := s.sendEnterSelectDungeonState(players[0], "selector_order_failure_reply", false, true)
-	if !errors.Is(err, followerFailure) {
-		t.Fatalf("missing follower failure: %v", err)
-	}
 	if !errors.Is(err, replyFailure) {
-		t.Fatalf("missing reply failure: %v", err)
+		t.Fatalf("missing leader write failure: %v", err)
+	}
+	if errors.Is(err, followerFailure) {
+		t.Fatalf("follower write failure must remain isolated from leader error: %v", err)
 	}
 }
 

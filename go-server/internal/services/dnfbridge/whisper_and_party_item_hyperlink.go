@@ -4,20 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"os"
 	"strconv"
 	"strings"
 )
 
-const whisperAndPartyItemHyperlinkEnv = "DNFBRIDGE_WHISPER_AND_PARTY_ITEM_HYPERLINK"
-
+// Graduated production policy: whisper and party item hyperlinks are always enabled.
 func whisperAndPartyItemHyperlinkEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(whisperAndPartyItemHyperlinkEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // decodeCurrentWhisperItemHyperlinkRequest decodes V212 op424 (0x02A037A1..0x02A039E9)

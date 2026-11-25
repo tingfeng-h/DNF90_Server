@@ -63,15 +63,15 @@ func TestNonLeaderSelectorSelfPrepareSwitchesBehavior(t *testing.T) {
 	})
 }
 
-// 开关取值口径：只有显式 on/1/true/yes 才打开。
+// 开关取值口径：默认开启（与线上行为一致），显式 off/0/false/no/legacy 才关闭回退旧行为。
 func TestPartySelectorMemberSelfPrepareSwitchValues(t *testing.T) {
-	for _, value := range []string{"", "off", "0", "false", "no", "relaxed"} {
+	for _, value := range []string{"off", "OFF", "0", "false", "no", "legacy"} {
 		t.Setenv(partySelectorMemberSelfPrepareEnv, value)
 		if partySelectorMemberSelfPrepareEnabled() {
 			t.Fatalf("value %q must keep the legacy behavior", value)
 		}
 	}
-	for _, value := range []string{"on", "ON", "1", "true", "yes"} {
+	for _, value := range []string{"", "on", "ON", "1", "true", "yes"} {
 		t.Setenv(partySelectorMemberSelfPrepareEnv, value)
 		if !partySelectorMemberSelfPrepareEnabled() {
 			t.Fatalf("value %q must enable the member self-prepare", value)

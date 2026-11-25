@@ -2,26 +2,19 @@ package dnfbridge
 
 import (
 	"context"
-	"os"
 	"strconv"
-	"strings"
 	"sync"
 
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
 const (
-	characterFriendRealtimePresenceEnv   = "DNFBRIDGE_CHARACTER_FRIEND_REALTIME_PRESENCE"
 	characterFriendSameChannelPrimeLimit = 64
 )
 
+// Graduated production policy: character friend realtime presence notifications are always enabled.
 func characterFriendRealtimePresenceEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(characterFriendRealtimePresenceEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 type characterFriendWatcherHub struct {

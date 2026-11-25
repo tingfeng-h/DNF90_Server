@@ -2,24 +2,16 @@ package dnfbridge
 
 import (
 	"context"
-	"os"
 	"strconv"
-	"strings"
 
 	"longheng.io/server/internal/modules/dnf/dnfenum"
 	"longheng.io/server/internal/modules/dnf/party"
 	dnfrepo "longheng.io/server/internal/modules/dnf/repository"
 )
 
-const partySameChannelCrossRoomInviteEnv = "DNFBRIDGE_PARTY_SAME_CHANNEL_CROSS_ROOM_INVITE"
-
+// Graduated production policy: same-channel cross-room party invites/applications are always enabled.
 func partySameChannelCrossRoomInviteEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(partySameChannelCrossRoomInviteEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 func isPartyCrossRoomInviteMode(mode byte) bool {

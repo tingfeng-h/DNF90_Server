@@ -37,9 +37,4 @@ func TestCurrentMode1EquipmentGuardianGemRawDFromItem(t *testing.T) {
 		t.Fatalf("empty medal emitted lateRawD=%x", got)
 	}
 
-	// Explicit rollback switch disables fallback.
-	t.Setenv(mode1GuardianGemLateRawDEnv, "off")
-	if got := currentMode1EquipmentGuardianGemRawDFromItem(nil, medal); len(got) != 0 {
-		t.Fatalf("rollback switch did not disable lateRawD: %x", got)
-	}
 }

@@ -70,7 +70,13 @@ func TestTownDisplayOnlyRetainedSingletonEntryAndRejoin(t *testing.T) {
 			drainTownPeerTest(t, s, member)
 			for index, conn := range connections {
 				baseline[index] = townDisplayFrames(t, conn.write.Bytes())
-				requireTownPartyActorHPFrameIDs(t, baseline[index], 2, 2, 9, 23)
+				if index == 0 {
+					// Leader holds an active singleton party; bug1 guard skips op9 kind3
+					// for non-party actor 1002 so it never clears [localPlayer+0x4C8].
+					requireTownPartyActorHPFrameIDs(t, baseline[index], 2, 2, 23)
+				} else {
+					requireTownPartyActorHPFrameIDs(t, baseline[index], 2, 2, 9, 23)
+				}
 				conn.write.Reset()
 			}
 			t.Setenv(townDisplayOnlyEnv, "on")
@@ -79,9 +85,16 @@ func TestTownDisplayOnlyRetainedSingletonEntryAndRejoin(t *testing.T) {
 			drainTownPeerTest(t, s, member)
 			for index, conn := range connections {
 				frames := townDisplayFrames(t, conn.write.Bytes())
-				requireTownPartyActorHPFrameIDs(t, frames, 2, 9, 23)
-				if !bytes.Equal(frames[1].body, baseline[index][2].body) || !bytes.Equal(frames[2].body, baseline[index][3].body) {
-					t.Fatal("singleton party identity or native area notification changed")
+				if index == 0 {
+					requireTownPartyActorHPFrameIDs(t, frames, 2, 23)
+					if !bytes.Equal(frames[1].body, baseline[index][2].body) {
+						t.Fatal("native area notification changed for retained singleton leader")
+					}
+				} else {
+					requireTownPartyActorHPFrameIDs(t, frames, 2, 9, 23)
+					if !bytes.Equal(frames[1].body, baseline[index][2].body) || !bytes.Equal(frames[2].body, baseline[index][3].body) {
+						t.Fatal("singleton party identity or native area notification changed")
+					}
 				}
 				conn.write.Reset()
 			}
