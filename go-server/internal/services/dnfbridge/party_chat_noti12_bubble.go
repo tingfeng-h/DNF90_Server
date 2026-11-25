@@ -2,19 +2,12 @@ package dnfbridge
 
 import (
 	"context"
-	"os"
-	"strings"
 )
 
-const partyChatNoti12BubbleEnv = "DNFBRIDGE_PARTY_CHAT_NOTI12_BUBBLE"
-
+// Graduated production policy: party chat always emits NOTI 12 (0x000C) with
+// the sender UID so both blue party chat and overhead bubbles render.
 func partyChatNoti12BubbleEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(partyChatNoti12BubbleEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // buildCurrentPartyChatNoti12Body builds a NOTI 12 (0x000C) party chat packet

@@ -17,30 +17,16 @@ import (
 // 而 kind3（删除）会命中客户端正在用的记录，直接触发 0x02017882（"队伍已解散"）。
 //
 // 默认（未设置 / on）= 发 kind2；legacy / off / 0 / false / no = 回到 kind3 退役老行为。
-const bug1TownReturnKind2RefreshEnv = "DNFBRIDGE_PARTY_TOWN_RETURN_KIND2_REFRESH"
+// Graduated production policies: town return always refreshes dungeon-scoped
+// party member tables in place via kind2 and retires departed alias records.
+const bug1RetireDungeonPartyAliasesEnv = "graduated_always_on"
 
 func bug1TownReturnKind2RefreshEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(bug1TownReturnKind2RefreshEnv))) {
-	case "0", "off", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
-// bug1RetireDungeonPartyAliasesEnv 控制「回城重建城镇组队投影之前，先把副本与城镇作用域
-// 的旧 op9 记录用 kind3 退役掉」。
-//
-// 默认（未设置 / on）= 退役；legacy / off / 0 / false / no = 回到改动前。
-const bug1RetireDungeonPartyAliasesEnv = "DNFBRIDGE_PARTY_TOWN_RETURN_RETIRE_ALIASES"
-
 func bug1RetireDungeonPartyAliasesEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(bug1RetireDungeonPartyAliasesEnv))) {
-	case "0", "off", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // bug1TownReturnEndpointReplayEnv 控制「回城重绑时是否重发一次对端端点（op11）」。

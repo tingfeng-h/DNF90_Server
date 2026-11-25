@@ -219,13 +219,6 @@ func (s *Service) handleOnlineRequestPeer(session *gameSession, typ uint16, body
 		// 护栏：观察方与该 target 已在同一支队伍时，不要再用 record(target, ch) 抢绑
 		// [localPlayer+0x4C8]（否则后续 record(self,ch) 因 oldUser==newUser 无法绑回）。
 		if s.shouldSkipTownCopresencePartyFrame(session, targetSession) {
-			if !samePartyTownSelectionNoticeEnabled() {
-				s.logGameEvent(session, "game-peer-selection-party-state-deferred",
-					"source_char_id", sourceID,
-					"target_id", parsed.TargetID,
-					"reason", "viewer_and_target_share_the_same_runtime_party")
-				return nil
-			}
 			s.logGameEvent(session, "game-peer-selection-party-frame-skipped",
 				"source_char_id", sourceID,
 				"target_id", parsed.TargetID,

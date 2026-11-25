@@ -10,8 +10,6 @@ import (
 )
 
 func TestTownPartyKeepSingletonInPlaceRetainsSamePartyAndFixedSlot(t *testing.T) {
-	t.Setenv("DNFBRIDGE_TOWN_PARTY_KEEP_SINGLETON", "1")
-	t.Setenv("DNFBRIDGE_PARTY_DISBAND_ON_SINGLETON", "on")
 
 	service := &Service{options: options{
 		currentClientVersion: "official-24.9",
@@ -66,8 +64,6 @@ func TestTownPartyKeepSingletonInPlaceRetainsSamePartyAndFixedSlot(t *testing.T)
 }
 
 func TestTownPartyKeepSingletonSkipsDungeonSurvivor(t *testing.T) {
-	t.Setenv("DNFBRIDGE_TOWN_PARTY_KEEP_SINGLETON", "1")
-	t.Setenv("DNFBRIDGE_PARTY_DISBAND_ON_SINGLETON", "on")
 
 	service := &Service{options: options{
 		currentClientVersion: "official-24.9",

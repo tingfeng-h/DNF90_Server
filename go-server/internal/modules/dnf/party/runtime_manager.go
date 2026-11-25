@@ -355,8 +355,7 @@ func (m *RuntimePartyManager) Kick(byUser uint16, byGeneration uint64, targetUse
 }
 
 // KickInContext removes targetUser from the leader's party. When inDungeon is
-// true, 2 -> 1 always follows disbandOnSingleton(); in town it honors
-// DNFBRIDGE_TOWN_PARTY_KEEP_SINGLETON.
+// true, 2 -> 1 disbands; in town it retains the surviving member in place.
 func (m *RuntimePartyManager) KickInContext(byUser uint16, byGeneration uint64, targetUser uint16, targetGeneration uint64, inDungeon bool) RuntimePartyResult {
 	if m == nil || byUser == 0 || targetUser == 0 || byUser == targetUser || byGeneration == 0 || targetGeneration == 0 {
 		return runtimePartyFailure("invalid_kick")

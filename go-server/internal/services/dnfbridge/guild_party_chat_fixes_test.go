@@ -94,18 +94,10 @@ func TestPartySameChannelCrossRoomInviteAllowsAndPrimesMode8(t *testing.T) {
 
 func TestPartyCrossRoomTownProjectionSwitches(t *testing.T) {
 	if !partyPostSnapshotTownRefreshSkipEnabled() {
-		t.Fatal("post-snapshot town refresh skip should be enabled by default")
+		t.Fatal("post-snapshot town refresh skip must stay enabled")
 	}
 	if !partySeriaActorNoOp23Enabled() {
-		t.Fatal("seria actor no-op23 projection should be enabled by default")
-	}
-	t.Setenv(partyPostSnapshotTownRefreshSkipEnv, "legacy")
-	t.Setenv(partySeriaActorNoOp23Env, "legacy")
-	if partyPostSnapshotTownRefreshSkipEnabled() {
-		t.Fatal("legacy env should disable post-snapshot town refresh skip")
-	}
-	if partySeriaActorNoOp23Enabled() {
-		t.Fatal("legacy env should disable seria actor no-op23 projection")
+		t.Fatal("seria actor no-op23 projection must stay enabled")
 	}
 }
 
@@ -150,7 +142,7 @@ func TestCharacterFriendRealtimePresenceSwitchAndWatchers(t *testing.T) {
 
 func TestPartyChatNoti12BubbleSwitchAndPayload(t *testing.T) {
 	if !partyChatNoti12BubbleEnabled() {
-		t.Fatal("party chat NOTI12 bubble should be enabled by default")
+		t.Fatal("party chat NOTI12 bubble must stay enabled")
 	}
 	op, body := currentPartyChatNoticePayload(0, 29, []byte("Peer29"), []byte("hi"))
 	if op != currentAreaChatNotifyOpcode {
@@ -158,14 +150,6 @@ func TestPartyChatNoti12BubbleSwitchAndPayload(t *testing.T) {
 	}
 	if len(body) < 4 || body[0] != currentPartyChatType || body[1] != 29 || body[2] != 0 || body[3] != 0 {
 		t.Fatalf("unexpected NOTI 12 party chat header: %x", body)
-	}
-	t.Setenv(partyChatNoti12BubbleEnv, "legacy")
-	if partyChatNoti12BubbleEnabled() {
-		t.Fatal("legacy env should disable party chat NOTI12 bubble")
-	}
-	opLegacy, _ := currentPartyChatNoticePayload(0, 29, []byte("Peer29"), []byte("hi"))
-	if opLegacy != currentOfficialWhisperNotifyOpcode {
-		t.Fatalf("expected legacy NOTI 65, got %d", opLegacy)
 	}
 }
 

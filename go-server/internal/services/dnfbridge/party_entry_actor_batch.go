@@ -3,26 +3,14 @@ package dnfbridge
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	"longheng.io/server/internal/modules/dnf/dnfenum"
 )
 
-// partyEntryActorBatchEnabled 控制"进本前的全局 actor 绑定"是否走批量版。
-//
-//	逐个（现行为）：每个成员各自一条 mode0 + 一条 mode1（sendCurrentPreDungeonContextPlayerState）
-//	批量（本文件）：同一收包者收到一条 mode0（全部成员行）+ 一条 mode1
-//
-// 用环境变量切换，便于 A/B；默认关闭：
-//
-//	DNFBRIDGE_PARTY_ENTRY_BATCH=1
+// partyEntryActorBatchEnabled 已转正为默认批量版：进本前将全队成员的
+// mode0（全部成员行）+ mode1（全部成员行）合并为两条包一次下发。
 func partyEntryActorBatchEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("DNFBRIDGE_PARTY_ENTRY_BATCH"))) {
-	case "1", "on", "true", "batch", "yes":
-		return true
-	}
-	return false
+	return true
 }
 
 // sendCurrentPartyEntryActorBindingBatch 把整队成员的 actor 绑定合成两条包：

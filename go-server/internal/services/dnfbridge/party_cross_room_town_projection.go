@@ -1,48 +1,20 @@
 package dnfbridge
 
 import (
-	"os"
-	"strings"
-
 	"longheng.io/server/internal/modules/dnf/alignedcmd"
 )
 
-const (
-	// DNFBRIDGE_PARTY_POST_SNAPSHOT_TOWN_REFRESH_SKIP controls whether
-	// finishManagedPartyJoin skips the second (post-op11) town actor projection.
-	// Line 70 already sends mode0+mode1(+op23) before op11/op153/op9; sending a
-	// second town mode0+mode1+op23 after op11 starts P2P handshake resets the
-	// remote peer actor mid-handshake and causes a red-computer failure on
-	// cross-room public-town joins. Default: on; set off/0/false/no/legacy to
-	// restore the old double refresh.
-	partyPostSnapshotTownRefreshSkipEnv = "DNFBRIDGE_PARTY_POST_SNAPSHOT_TOWN_REFRESH_SKIP"
-
-	// DNFBRIDGE_PARTY_SERIA_ACTOR_NO_OP23 controls whether two same-channel
-	// party members who are both in their own Seria rooms receive mode0+mode1
-	// (registering the peer into the active scene table 0x056A3758 so op153 HP,
-	// op9 CParty* binding, party HUD right-click menu, and P2P work) while
-	// omitting the trailing op23 (NOTI 0x17) so the client never renders the
-	// peer inside the local Seria room. Default: on; set off/0/false/no/legacy
-	// to restore the old full block.
-	partySeriaActorNoOp23Env = "DNFBRIDGE_PARTY_SERIA_ACTOR_NO_OP23"
-)
-
+// Graduated production policies:
+//   - Always skip the redundant post-op11 town actor refresh in finishManagedPartyJoin
+//     so P2P handshakes are never reset mid-flight.
+//   - Always project same-channel Seria-room party peers with mode0+mode1 (no op23)
+//     so HUD/HP/P2P work without rendering the peer inside the private Seria room.
 func partyPostSnapshotTownRefreshSkipEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(partyPostSnapshotTownRefreshSkipEnv))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 func partySeriaActorNoOp23Enabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(partySeriaActorNoOp23Env))) {
-	case "off", "0", "false", "no", "legacy":
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // townPrivateRoomPeerProjectionPolicy decides how a same-physical-Seria-map

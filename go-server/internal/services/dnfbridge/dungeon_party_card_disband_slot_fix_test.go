@@ -38,9 +38,4 @@ func TestDungeonCardRetainsEntryPartySlotAfterMidDungeonDisband(t *testing.T) {
 		t.Fatalf("expected op35 CardSlots[0] to remain empty for 2P, got %+v", slots[0])
 	}
 
-	// Rollback switch: off restores legacy 0 fallback.
-	t.Setenv(dungeonPartyCardDisbandEntrySlotEnv, "off")
-	if got := currentDungeonCardFlipRowStateValue(session); got != 0 {
-		t.Fatalf("expected rollback fallback 0 when disabled, got %d", got)
-	}
 }
