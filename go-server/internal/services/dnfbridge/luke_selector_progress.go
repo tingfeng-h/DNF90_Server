@@ -17,6 +17,9 @@ const currentLukeSelectorProgressMsgID uint16 = 602
 // This route intentionally owns only ordinary Luke (42), whose entry authority
 // already uses the same character's persisted DungeonPermission.ClearState.
 func (s *Service) handleCurrentLukeSelectorProgress(session *gameSession, body []byte) error {
+	if dailySequentialDungeonEnabled() {
+		return s.handleDailySequentialSelectorProgress(session, body)
+	}
 	if len(body) != 4 || binary.LittleEndian.Uint32(body) != uint32(currentLukeNormalSequenceID) {
 		s.logGameEvent(session, "game-luke-selector-progress-rejected", "reason", "unsupported_sequence_or_shape", "body_len", len(body))
 		return nil

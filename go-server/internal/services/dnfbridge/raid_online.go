@@ -586,6 +586,9 @@ func (s *Service) handleOnlineStartRaid(session *gameSession, typ uint16, body [
 	if err := s.applyRuntimeRaidParties(state); err != nil {
 		return err
 	}
+	if err := s.syncCurrentRaidRosterAfterStartParties(state); err != nil {
+		return err
+	}
 	markStage("parties")
 	if s.options.currentClientVersion == "official-24.9" {
 		for _, member := range state.Members {

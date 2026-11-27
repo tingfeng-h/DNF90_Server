@@ -31,11 +31,12 @@ func TestRealPVFLukeThroneNeedsEveryPersistedPrerequisiteForEachCharacter(t *tes
 	d := worldmap.ParseDungeon(5106, doc.Path, doc)
 	beforeInventory, _, _ := f.repos.Inventory.Load(context.Background(), "19")
 	beforeCharacter, _, _ := f.repos.Character.Load(context.Background(), "19")
+	day := f.service.currentDailySequentialServiceDay()
 	for n, id := range prerequisites {
 		if err := f.service.validateCurrentLukeNormalThroneEntry(context.Background(), session, d); err == nil {
 			t.Fatalf("only %d prerequisites admitted", n)
 		}
-		if _, _, err := f.repos.DungeonPermission.UpsertMax(context.Background(), "19", id, 1); err != nil {
+		if _, err := f.service.recordDailySequentialClear(context.Background(), f.repos, "19", id, day); err != nil {
 			t.Fatal(err)
 		}
 	}

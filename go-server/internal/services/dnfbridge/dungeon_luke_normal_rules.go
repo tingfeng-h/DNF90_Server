@@ -183,6 +183,9 @@ func (s *Service) resolveCurrentLukeNormalNextDungeon(runtime *runtimeDungeonSta
 // (06:00) reset is applied. This is a tracked limitation, not a claim of daily
 // fidelity; do not add a day boundary without reset evidence.
 func (s *Service) validateCurrentLukeNormalThroneEntry(ctx context.Context, session *gameSession, dungeon worldmap.Dungeon) error {
+	if dailySequentialDungeonEnabled() {
+		return s.validateDailySequentialDungeonEntry(ctx, session, dungeon)
+	}
 	if dungeon.ID != 5106 || !strings.EqualFold(strings.ReplaceAll(dungeon.Path, "\\", "/"), "dungeon/luke_normal/solium.dgn") {
 		return nil
 	}

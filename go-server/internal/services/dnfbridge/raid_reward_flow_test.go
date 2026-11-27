@@ -199,7 +199,7 @@ func TestRealPVFAntonNextPhaseRequiresRewardsThenLeaderStartNoNewTicket(t *testi
 	found := false
 	for len(stream) > 0 {
 		p, rest := splitGameServerUpperPacket(t, stream)
-		if p.Header.MsgID == 587 && reflect.DeepEqual(p.Body, []byte{2, 1}) {
+		if p.Header.MsgID == 587 && (reflect.DeepEqual(p.Body, []byte{1, 1}) || reflect.DeepEqual(p.Body, []byte{2, 1})) {
 			found = true
 		}
 		stream = rest

@@ -464,7 +464,9 @@ func (s *Service) sendCurrentAccountFriendLists(session *gameSession, source str
 				return err
 			}
 		}
-		s.primeSameChannelAccountFriends(ctx, identity, rows)
+		if crossSceneMode8PrimeAllowedForSource(source) {
+			s.primeSameChannelAccountFriends(ctx, identity, rows)
+		}
 		for _, body := range bodies {
 			if err := s.sendGameUpperRawClassCodec(session, 1371, body, 0, true); err != nil {
 				return err

@@ -292,7 +292,16 @@ func (s *Service) produceCurrentDungeonSettlementPlanWithResourcesLocked(
 	if len(permissionBody) != 0 {
 		plan.DungeonPermissionBody = append([]byte(nil), permissionBody...)
 	}
-	if currentLukeNormalDungeon(runtime) && permissionErr == nil && session.lukeSelectorProgressCharacterID == session.selectedCharacterID {
+	if dailySequentialDungeonEnabled() {
+		if permissionErr == nil {
+			progress, err := s.commitAndBuildDailySequentialProgress(ctx, session, runtime)
+			if err != nil {
+				s.logGameEvent(session, "game-luke-selector-progress-freeze-failed", "reason", err)
+			} else if len(progress) != 0 {
+				plan.LukeSelectorProgressBody = append([]byte(nil), progress...)
+			}
+		}
+	} else if currentLukeNormalDungeon(runtime) && permissionErr == nil && session.lukeSelectorProgressCharacterID == session.selectedCharacterID {
 		progress, err := s.currentLukeSelectorProgress(ctx, session)
 		if err != nil {
 			s.logGameEvent(session, "game-luke-selector-progress-freeze-failed", "reason", err)

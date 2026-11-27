@@ -31,13 +31,23 @@ func (s *Service) sendCurrentFiendWarProjectionLocked(p *gameSession, state runt
 	if err != nil {
 		return err
 	}
+	var (
+		countdownDelay time.Duration
+		hasCountdown   bool
+	)
 	if fresh && !b.TimedOut && !b.PhaseCompleted {
 		// v144's init consumer clears old nodes and restores active board mode.
 		// Restore the complete board before resuming deltas; replaying state2
 		// would replay the opening movie on a same-instance subscription.
 		initial := []currentFiendWarWire{{currentFiendWarInit, nil}}
 		if announce && first {
-			initial = append(initial, currentFiendWarWire{587, []byte{2, 0}}, currentFiendWarWire{currentFiendWarStateNotice, []byte{2, 0}})
+			var openingState byte
+			openingState, countdownDelay, hasCountdown = currentRaidStartOpeningState(b, time.Now())
+			if hasCountdown {
+				initial = append(initial, currentFiendWarWire{587, []byte{openingState, 0}})
+			} else {
+				initial = append(initial, currentFiendWarWire{587, []byte{2, 0}}, currentFiendWarWire{currentFiendWarStateNotice, []byte{2, 0}})
+			}
 		}
 		packets = append(initial, packets...)
 	}
@@ -53,5 +63,8 @@ func (s *Service) sendCurrentFiendWarProjectionLocked(p *gameSession, state runt
 	p.fiendWarProjection = view
 	p.raidProjection.identity, p.raidProjection.initialized, p.raidProjection.version = id, true, b.ProgressVersion
 	p.raidProjection.startTransitionSent = true
+	if hasCountdown {
+		s.scheduleCurrentRaidStartCountdownCompletion(p, b, state.RaidKey, 0, countdownDelay, true)
+	}
 	return nil
 }

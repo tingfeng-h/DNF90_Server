@@ -42,14 +42,25 @@ func (s *Service) primeSingleSameChannelGuildMode8(ctx context.Context, viewer b
 	}
 	owner := byte(viewerChannel)
 	revision := currentCrossSceneAppearanceRevision(peer.session)
+	if crossSceneMode8AlreadyPrimed(viewer, peer.character, viewerChannel, revision) {
+		return false, nil
+	}
 	route := s.currentSceneActorRoute()
 	loadedID, name, character, found := s.characterForEnter(ctx, peer.session, peer.character)
 	if !found || loadedID != peer.character || character.CharacterID != strconv.Itoa(int(peer.character)) || name == "" {
 		return false, nil
 	}
-	mode0, err := s.buildCurrentSceneObjectListBodyForSessionInContextStrict(ctx, peer.session, peer.character, name, character, true, owner)
-	if err != nil {
-		return false, err
+	var (
+		mode0 []byte
+		err   error
+	)
+	if crossSceneMode8LightweightEnabled() {
+		mode0 = s.buildCurrentLightweightCrossSceneMode0(ctx, peer.session, peer.character, name, character, owner)
+	} else {
+		mode0, err = s.buildCurrentSceneObjectListBodyForSessionInContextStrict(ctx, peer.session, peer.character, name, character, true, owner)
+		if err != nil {
+			return false, err
+		}
 	}
 	var legacyRepo dnfrepo.LegacyUserInfoRepository
 	if repositories, ok := s.repositoryGroupFor(ctx); ok {
@@ -64,7 +75,7 @@ func (s *Service) primeSingleSameChannelGuildMode8(ctx context.Context, viewer b
 	if err != nil {
 		return false, err
 	}
-	return s.sendCurrentCrossSceneProfileRefreshFrame(ctx, viewer.session, peer.session, priming, func() bool {
+	delivered, err := s.sendCurrentCrossSceneProfileRefreshFrame(ctx, viewer.session, peer.session, priming, func() bool {
 		return revision == peer.session.crossSceneAppearanceRevision &&
 			route == s.currentSceneActorRoute() &&
 			s.boundGameSessionCharacterCurrent(viewer) &&
@@ -72,6 +83,10 @@ func (s *Service) primeSingleSameChannelGuildMode8(ctx context.Context, viewer b
 			currentTownPresenceChannelID(viewer.session) == viewerChannel &&
 			currentTownPresenceChannelID(peer.session) == viewerChannel
 	}, false)
+	if err == nil && delivered {
+		markCrossSceneMode8Primed(viewer, peer.character, viewerChannel, revision)
+	}
+	return delivered, err
 }
 
 // primeCurrentSameChannelGuildRosterForBound silently primes category-1

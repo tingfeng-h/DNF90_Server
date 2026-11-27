@@ -37,6 +37,14 @@ func partyDungeonDropRecipients(runtime *runtimeDungeonState, characterID uint16
 func (s *Service) planPartyDungeonMonsterDrops(session *gameSession, runtime *runtimeDungeonState, monster runtimeDungeonMonster, actorKey uint16) ([]currentDungeonDeathDropWire, error) {
 	recipients := partyDungeonDropRecipients(runtime, session.selectedCharacterID, actorKey)
 	if len(recipients) == 1 {
+		if !s.claimDailySequentialMonsterDrop(session.selectedCharacterID, runtime, monster.Spawn.MonsterID) {
+			s.logGameEvent(session, "game-dungeon-daily-monster-drop-suppressed",
+				"char_id", session.selectedCharacterID,
+				"dungeon_id", runtime.Dungeon.ID,
+				"monster_id", monster.Spawn.MonsterID,
+				"reason", "daily_sequential_monster_already_dropped_today")
+			return nil, nil
+		}
 		return s.planCurrentDungeonMonsterDropsWithLuckyRate(runtime, monster, actorKey, s.currentLuckyUniqueDropPercent(session, runtime.Character))
 	}
 	monsterCatalog, err := s.dungeonMonsterCatalog()
@@ -54,6 +62,14 @@ func (s *Service) planPartyDungeonMonsterDrops(session *gameSession, runtime *ru
 	_, dimensionMatched := currentDungeonDimensionTier(dimension, runtime.Dungeon.ID, runtime.Character.Level)
 	var all []currentDungeonDeathDropWire
 	for _, recipient := range recipients {
+		if !s.claimDailySequentialMonsterDrop(recipient.CharacterID, runtime, monster.Spawn.MonsterID) {
+			s.logGameEvent(session, "game-dungeon-daily-monster-drop-suppressed",
+				"char_id", recipient.CharacterID,
+				"dungeon_id", runtime.Dungeon.ID,
+				"monster_id", monster.Spawn.MonsterID,
+				"reason", "daily_sequential_monster_already_dropped_today")
+			continue
+		}
 		view := *runtime
 		if (dimensionMatched || s.currentPortedActivityEnabled(1054)) && recipient.CharacterID != session.selectedCharacterID {
 			character, err := s.loadDimensionDropCharacter(recipient.CharacterID)

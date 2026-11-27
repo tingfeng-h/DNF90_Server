@@ -220,7 +220,7 @@ func TestCurrentRaidBattleRealPVFAdmissionAndNativeProjection(t *testing.T) {
 							t.Fatal("map projection differs from owner")
 						}
 					case 587:
-						if !bytes.Equal(packet.Body, []byte{2, 0}) {
+						if !bytes.Equal(packet.Body, []byte{1, 0}) && !bytes.Equal(packet.Body, []byte{2, 0}) {
 							t.Fatal("native battle state/phase")
 						}
 					case 596:

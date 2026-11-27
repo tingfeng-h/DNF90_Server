@@ -33,15 +33,16 @@ func TestLukeSelectorQueryDispatchIsReadOnlyAndCharacterScoped(t *testing.T) {
 		t.Run(transport, func(t *testing.T) {
 			f := newSeekerLukeNextFixture(t, seekerLukeNextSource([]uint32{5101, 5102, 5103, 5104, 5105, 5106}, []uint32{5101, 5102, 5103, 5104, 5105, 5106}, true))
 			ctx := context.Background()
+			day := f.service.currentDailySequentialServiceDay()
 			for _, id := range []uint32{5101, 5102, 5103, 5104, 5105} {
-				if _, _, err := f.repos.DungeonPermission.UpsertMax(ctx, "99", id, 3); err != nil {
+				if _, err := f.service.recordDailySequentialClear(ctx, f.repos, "99", id, day); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, _, err := f.repos.DungeonPermission.UpsertMax(ctx, "98", 5106, 3); err != nil {
+			if _, err := f.service.recordDailySequentialClear(ctx, f.repos, "98", 5106, day); err != nil {
 				t.Fatal(err)
 			}
-			before, _, _ := f.repos.DungeonPermission.Load(ctx, "99")
+			before, _, _ := f.repos.Settings.Load(ctx, dailySequentialClearScope("99"))
 			for repeat := 0; repeat < 2; repeat++ {
 				req := gameplayRequest{Opcode: 869, Classification: 1, Body: []byte{42, 0, 0, 0}}
 				var handled bool
@@ -66,7 +67,7 @@ func TestLukeSelectorQueryDispatchIsReadOnlyAndCharacterScoped(t *testing.T) {
 			if len(stream) != 0 {
 				t.Fatal("unexpected ACK or extra notification")
 			}
-			after, _, _ := f.repos.DungeonPermission.Load(ctx, "99")
+			after, _, _ := f.repos.Settings.Load(ctx, dailySequentialClearScope("99"))
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("query mutated clear authority")
 			}
@@ -85,7 +86,7 @@ func TestLukeSelectorQueryRejectsUnownedMalformedAndMissingResources(t *testing.
 			case "trailing":
 				req.Body = append(req.Body, 0)
 			case "other_sequence":
-				req.Body[0] = 28
+				req.Body[0] = 43
 			case "wrong_class":
 				req.Classification = 0
 			case "no_character":
@@ -101,6 +102,7 @@ func TestLukeSelectorQueryRejectsUnownedMalformedAndMissingResources(t *testing.
 				}
 				f.source["etc/sequential_dungeon_info.etc"] = seekerLukeNextSequenceText(ids, true)
 			case "foreign_record":
+				t.Setenv(dailySequentialDungeonEnv, "off")
 				f.repos.DungeonPermission = &lukeForeignRecord{f.repos.DungeonPermission}
 				f.service.repositoryProvider = func() (dnfrepo.Group, bool) { return f.repos, true }
 			}

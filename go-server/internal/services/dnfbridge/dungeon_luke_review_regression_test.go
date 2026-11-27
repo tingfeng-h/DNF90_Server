@@ -55,6 +55,7 @@ func TestRealPVFLukeRaidMaterialsAreMaterialTypeAndSuppressed(t *testing.T) {
 // etc/ table references 5101..5106. This pins today's behavior so that adding a
 // service-day reset later is an intentional change, not an accidental one.
 func TestRealPVFLukeThroneAdmissionUsesPersistedLifetimeClears(t *testing.T) {
+	t.Setenv(dailySequentialDungeonEnv, "off")
 	f, session, _ := normalLukeFixture(t)
 	source, err := f.service.initialEquipmentArchiveLocked()
 	if err != nil {

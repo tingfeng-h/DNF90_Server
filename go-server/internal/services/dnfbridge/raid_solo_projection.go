@@ -29,6 +29,10 @@ func (s *Service) currentRaidLivePartyProjection(state runtimeRaidState) runtime
 			continue
 		}
 		party, found := manager.SnapshotByUser(state.Members[i].CharID, 0)
+		if currentRaidMemberRetainsExplicitStartedGroup(state, *member, party, found) {
+			member.OrdinaryPartySolo = false
+			continue
+		}
 		state.Members[i].OrdinaryPartySolo = !found || len(party.Members) < 2
 	}
 	return state

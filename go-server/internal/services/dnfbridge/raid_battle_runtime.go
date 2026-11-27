@@ -481,13 +481,15 @@ func (s *Service) sendCurrentRaidBattleState(session *gameSession, state runtime
 	if seconds < 0 {
 		seconds = 0
 	}
-	duration := currentRaidNativeDuration(b.Mode, b.Deadline, b.Configuration.PhaseLimitSeconds[b.Phase]+b.Configuration.StartDelaySeconds, time.Now())
+	now := time.Now()
+	openingState, countdownDelay, hasCountdown := currentRaidStartOpeningState(b, now)
+	duration := currentRaidNativeDuration(b.Mode, b.Deadline, b.Configuration.PhaseLimitSeconds[b.Phase]+b.Configuration.StartDelaySeconds, now)
 	for _, packet := range []struct {
 		opcode uint16
 		body   []byte
 	}{
 		{585, mapBody},
-		{587, []byte{2, b.Phase}},
+		{587, []byte{openingState, b.Phase}},
 		{596, raid.BuildTimerBody(0, 0, uint32(b.Deadline.Unix()), duration)},
 		{597, raid.BuildRemainingTimeBody(0, uint32(seconds))},
 	} {
@@ -513,8 +515,11 @@ func (s *Service) sendCurrentRaidBattleState(session *gameSession, state runtime
 		session.raidProjection.identity, session.raidProjection.version, session.raidProjection.initialized = identity, b.ProgressVersion, true
 	}
 	session.raidProjection.startTransitionSent = true
+	if hasCountdown {
+		s.scheduleCurrentRaidStartCountdownCompletion(session, b, state.RaidKey, b.Phase, countdownDelay, false)
+	}
 	s.logGameEvent(session, "game-raid-battle-state-sent", "raid_key", state.RaidKey, "mode", b.Mode,
-		"single", b.Single, "phase", b.Phase, "dungeon_count", len(b.Dungeons), "remaining_seconds", seconds)
+		"single", b.Single, "phase", b.Phase, "dungeon_count", len(b.Dungeons), "remaining_seconds", seconds, "opening_state", openingState)
 	return nil
 }
 

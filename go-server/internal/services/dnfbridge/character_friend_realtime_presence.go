@@ -123,7 +123,7 @@ func (s *Service) recordCurrentCharacterFriendWatchersAndPrime(
 	}
 	hub.mu.Unlock()
 
-	if !guildRosterSameChannelPrimeEnabled() || len(rows) == 0 {
+	if !guildRosterSameChannelPrimeEnabled() || !crossSceneMode8PrimeAllowedForSource(source) || len(rows) == 0 {
 		return
 	}
 	session.dungeon.mu.Lock()
