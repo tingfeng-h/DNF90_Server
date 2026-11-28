@@ -138,6 +138,9 @@ func (s *Service) tryCurrentFiendWarEncounterWithDiagnostic(p *gameSession, diag
 		if !peerOK || peerSource != source {
 			continue
 		}
+		if time.Now().Before(f.RecoveryUntil[m.CharID]) {
+			continue // 撤退复活倒计时中的成员不能被拉进遭遇战，也不应阻塞同区域他人进图。
+		}
 		if !peerReady {
 			diagnostic.setReason("peer_scene_not_ready")
 			return nil
@@ -146,8 +149,7 @@ func (s *Service) tryCurrentFiendWarEncounterWithDiagnostic(p *gameSession, diag
 		peerBusy := peer.dungeon.runtime != nil
 		peer.dungeon.mu.Unlock()
 		if peerBusy {
-			diagnostic.setReason("peer_runtime_present")
-			return nil
+			continue // 已在副本中的成员跳过，不阻塞同区域其他人进图。
 		}
 		if len(roster) >= a.MemberMax {
 			diagnostic.setReason("roster_capacity")
@@ -230,6 +232,18 @@ func (s *Service) tryCurrentFiendWarEncounterWithDiagnostic(p *gameSession, diag
 			p.fiendWarPendingMove = nil
 		}
 		p.townMu.Unlock()
+		for _, m := range roster {
+			if m.CharID == p.selectedCharacterID {
+				continue
+			}
+			if peer, online := s.onlineGameSession(m.CharID); online {
+				peer.townMu.Lock()
+				if peer.fiendWarPendingMove != nil && peer.fiendWarPendingMove.instance == b.InstanceID {
+					peer.fiendWarPendingMove = nil
+				}
+				peer.townMu.Unlock()
+			}
+		}
 	} else if err != nil {
 		diagnostic.setReason("dungeon_entry_error")
 	} else {

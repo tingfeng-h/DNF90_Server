@@ -655,7 +655,7 @@ func (s *Service) prepareDungeonRuntimePlanned(
 			return dungeonMazeSelection{Index: partyPlan.mazeIndex, Reason: "ordinary_party_leader_frozen_selection"}, nil
 		}
 		if isCurrentFiendWarChannel(session) {
-			return s.selectCurrentFiendWarMaze(session, dungeon)
+			return s.selectCurrentFiendWarMaze(session, dungeon, resolver)
 		}
 		return selectDungeonMaze(dungeon.Mazes, request.Difficulty, questRecord, s.chooseDungeonIndex)
 	}
@@ -697,6 +697,15 @@ func (s *Service) prepareDungeonRuntimePlanned(
 				}
 			}
 			return 0, fmt.Errorf("party leader map %d is not a candidate for room %s", mapID, choice.Coordinate)
+		}
+		if choice.FileType == worldmap.MapFileBoss && len(choice.Candidates) > 1 {
+			if wantBoss, ok := s.currentFiendWarExpectedFixtureBossID(session, choice.DungeonID); ok {
+				for _, candidate := range choice.Candidates {
+					if fiendWarMapContainsMonster(candidate, wantBoss) {
+						return candidate.ID, nil
+					}
+				}
+			}
 		}
 		index, chooseErr := s.chooseDungeonIndex(len(choice.Candidates))
 		if chooseErr != nil {

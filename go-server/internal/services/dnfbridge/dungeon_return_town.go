@@ -943,6 +943,7 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 	// 队伍记录会留下来，队伍框一直残留。提前落成与 ensure... 的 :1075 同一个来源。
 	session.townMu.Lock()
 	session.townActorOwnerChannel = returnOwnerChannel
+	session.fiendWarPendingMove = nil
 	session.townMu.Unlock()
 	if runtime.guildPractice != nil {
 		s.projectOptionalGuildEssenceSnapshot(session)
@@ -967,7 +968,13 @@ func (s *Service) commitPendingDungeonReturnForExpectedSceneRequest(session *gam
 	//   - deadline owner：自动阶段超时，保留普通队伍，只退自己的 run；
 	//   - 其余中途放弃：当前客户端仅退出本人，保留留图队伍并移交队长。
 	if s.retireCurrentFiendWarEncounterParty(session, runtime) {
-		// Every combat party is temporary; the attack-raid's numbered seats stay.
+		// 若还有其他队友留在超时空副本里，且本次是队员个人中途放弃（非队长整队撤退），
+		// 立刻将其移出临时遭遇战队伍，避免残留队伍框直到剩余队员打完才解散。
+		if committedStatus == worldmap.DungeonRunAbandoned && !runtime.fiendWarRetreatKeepsParty && leaderExitInstance != nil {
+			if err := s.leaveRuntimePartyOnMemberGiveup(session, leaderExitInstance); err != nil {
+				s.logGameEvent(session, "game-fiendwar-member-giveup-leave-party-failed", "char_id", leaderExitCharacterID, "error", err)
+			}
+		}
 	} else if s.options.currentClientVersion == "official-24.9" &&
 		(runtime.townReturnRequestMsgID == uint16(dnfenum.CmdPacketLeaveParty) ||
 			(committedStatus == worldmap.DungeonRunCompleted && runtime.townReturnRequestMsgID == uint16(dnfenum.CmdPacketGiveupGame))) {

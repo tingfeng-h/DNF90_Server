@@ -53,7 +53,7 @@ func TestCurrentInfoReplyRejectsInvalidNativeOwners(t *testing.T) {
 				info.Members = currentCodecFixtureMembers(21)
 			case "member":
 				selector = 1
-				info.Members = []CurrentMemberRecord{{}}
+				info.Members = []CurrentMemberRecord{{Core: MemberRecord{Field4: 1}}}
 			}
 			if body, err := BuildCurrentInfoReplyBody(info, selector); err == nil || body != nil {
 				t.Fatal("invalid owner returned sendable ACK")

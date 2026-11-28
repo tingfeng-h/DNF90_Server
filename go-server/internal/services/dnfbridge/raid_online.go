@@ -58,6 +58,7 @@ type runtimeRaidMemberState struct {
 	// A recruiting manager action owns this planned seat's display even before
 	// raid start materializes ordinary parties. Automatic admission seats do not.
 	RecruitingPlacementExplicit bool
+	DisconnectedAt              time.Time
 }
 
 // runtimePartyRaidExitProjection is the ordinary-party half of a successful

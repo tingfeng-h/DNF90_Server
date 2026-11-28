@@ -49,8 +49,9 @@ func TestRealPVFCurrentFiendWarFailurePresentationNoSettlementUI(t *testing.T) {
 			}
 			result, rest := splitGameServerUpperPacket(t, conn.write.Bytes())
 			state, rest := splitGameServerUpperPacket(t, rest)
-			if result.Header.MsgID != 601 || result.Header.Classification != 0 || len(result.Body) != 10 || result.Body[0] != 3 || result.Body[9] != 1 || state.Header.MsgID != currentFiendWarStateNotice || !bytes.Equal(state.Body, []byte{6, 0}) || len(rest) != 0 {
-				t.Fatal("必须只发一次601类型3，再发1484状态6", result, state, rest)
+			movie, rest := splitGameServerUpperPacket(t, rest)
+			if result.Header.MsgID != 601 || result.Header.Classification != 0 || len(result.Body) != 10 || result.Body[0] != 3 || result.Body[9] != 1 || state.Header.MsgID != currentFiendWarStateNotice || !bytes.Equal(state.Body, []byte{6, 0}) || movie.Header.MsgID != currentFiendWarStateNotice || !bytes.Equal(movie.Body, []byte{3, 0}) || len(rest) != 0 {
+				t.Fatal("必须只发一次601类型3，再发1484状态6与1484状态3播放失败动画", result, state, movie, rest)
 			}
 			after, _, _ := f.repos.Inventory.Load(context.Background(), "19")
 			if !reflect.DeepEqual(before, after) || b.RewardFlow[0] != nil || len(f.service.raidWeeklyIntents) != 0 || b.PhaseCompleted {

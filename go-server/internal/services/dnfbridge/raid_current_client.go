@@ -226,18 +226,27 @@ func (s *Service) handleCurrentModifyRaid(session *gameSession, op uint16, body 
 func currentRuntimeRaidMembers(state runtimeRaidState) []raid.CurrentMemberRecord {
 	core := runtimeRaidMemberRefresh(state).Members
 	members := make([]raid.CurrentMemberRecord, len(core))
-	solo := make(map[uint16]bool, len(state.Members))
+	byChar := make(map[uint16]runtimeRaidMemberState, len(state.Members))
 	for _, member := range state.Members {
-		solo[member.CharID] = member.OrdinaryPartySolo
+		byChar[member.CharID] = member
 	}
 	for i, record := range core {
+		member := byChar[record.CharKey]
 		// NOTI591's GroupIndex selects PartyIndex/party_icon.img. Frame 0 is
 		// the native "单人" chip, not the raid's single-player mode flag.
-		if solo[record.CharKey] {
+		// Offline members keep their group slot and use CharKey=0 +
+		// Field48=DisconnectedAt so the client grays them out and displays
+		// the reconnect countdown in place of their avatar.
+		if member.UserState == 0 {
+			record.CharKey = 0
+			if !member.DisconnectedAt.IsZero() {
+				record.Field48 = uint32(member.DisconnectedAt.Unix())
+			}
+		} else if member.OrdinaryPartySolo {
 			record.GroupIndex, record.SlotOrder = 0, 0
 		}
 		// The current native member reader stores this byte at record+0x38.
-		record.Field56 = currentRaidMemberPhaseClearCount(state, record.CharKey)
+		record.Field56 = currentRaidMemberPhaseClearCount(state, member.CharID)
 		// Specialized trailing fields still have no authoritative owner.
 		members[i] = raid.CurrentMemberRecord{Core: record}
 	}
@@ -248,7 +257,7 @@ func currentRuntimeRaidMetadata(state runtimeRaidState) raid.CurrentMetadata {
 	members := currentRuntimeRaidMembers(state)
 	var leader raid.CurrentMemberRecord
 	for _, member := range members {
-		if member.Core.CharKey == state.LeaderID {
+		if member.Core.CharKey == state.LeaderID || (member.Core.CharKey == 0 && member.Core.Field66BoolSource != 0) {
 			leader = member
 			break
 		}

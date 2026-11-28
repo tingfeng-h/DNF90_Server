@@ -79,7 +79,64 @@ func validateCurrentFiendWarDungeon(b *runtimeRaidBattle, id uint16, r *runtimeD
 	}
 	return nil
 }
-func (s *Service) selectCurrentFiendWarMaze(p *gameSession, d worldmap.Dungeon) (dungeonMazeSelection, error) {
+func fiendWarMapContainsMonster(m worldmap.Map, bossID uint32) bool {
+	for _, spawn := range m.Monsters {
+		if spawn.MonsterID == int64(bossID) {
+			return true
+		}
+	}
+	return false
+}
+
+func fiendWarMazeForBossID(resolver *worldmap.Resolver, d worldmap.Dungeon, bossID uint32) (int, bool) {
+	if resolver == nil || bossID == 0 {
+		return 0, false
+	}
+	for idx, maze := range d.Mazes {
+		if maze.Boss == nil {
+			continue
+		}
+		candidates, err := resolver.ResolveCandidates(worldmap.ResolveRequest{
+			DungeonID: d.ID,
+			MazeIndex: idx,
+			X:         maze.Boss.X,
+			Y:         maze.Boss.Y,
+		})
+		if err != nil {
+			continue
+		}
+		for _, c := range candidates {
+			if fiendWarMapContainsMonster(c.Map, bossID) {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func (s *Service) currentFiendWarExpectedFixtureBossID(p *gameSession, dungeonID int64) (uint32, bool) {
+	if s == nil || p == nil || !isCurrentFiendWarChannel(p) {
+		return 0, false
+	}
+	s.raidMu.Lock()
+	defer s.raidMu.Unlock()
+	state := s.runtimeRaidByMemberLocked(p.selectedCharacterID)
+	if state == nil || state.Battle == nil || state.Battle.FiendWar == nil {
+		return 0, false
+	}
+	f := state.Battle.FiendWar
+	a, ok := f.AreaForDungeon(int(dungeonID))
+	if !ok || a.Kind == "" {
+		return 0, false
+	}
+	fixed, ok := f.MazeForArea(a.Index)
+	if !ok {
+		return 0, false
+	}
+	return fiendwar.FiendWarFixtureBossID(a.Dungeon, fixed)
+}
+
+func (s *Service) selectCurrentFiendWarMaze(p *gameSession, d worldmap.Dungeon, resolver *worldmap.Resolver) (dungeonMazeSelection, error) {
 	s.raidMu.Lock()
 	defer s.raidMu.Unlock()
 	state := s.runtimeRaidByMemberLocked(p.selectedCharacterID)
@@ -100,6 +157,12 @@ func (s *Service) selectCurrentFiendWarMaze(p *gameSession, d worldmap.Dungeon) 
 		}
 	} else if fixed, ok := f.MazeForArea(a.Index); ok {
 		index = fixed
+		// 兵营/前哨等设施在部分 PVF 中的 maze 顺序可能与固定编号不一致，优先按目标领主怪物 ID 反查对应 maze。
+		if wantBoss, hasBoss := fiendwar.FiendWarFixtureBossID(a.Dungeon, fixed); hasBoss {
+			if matched, found := fiendWarMazeForBossID(resolver, d, wantBoss); found {
+				index = matched
+			}
+		}
 	}
 	if index < 0 || index >= len(d.Mazes) {
 		return dungeonMazeSelection{}, worldmap.ErrMazeNotFound

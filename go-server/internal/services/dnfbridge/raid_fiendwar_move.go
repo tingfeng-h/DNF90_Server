@@ -9,8 +9,8 @@ type currentFiendWarMovePlan struct {
 	raid               uint32
 	instance           string
 	character          uint16
-	from, to           int
-	applied, confirmed bool
+	from, to                         int
+	applied, confirmed, combatTarget bool
 }
 
 func (s *Service) prepareCurrentFiendWarMove(p *gameSession, q currentTownSetUserAreaRequest) (*currentFiendWarMovePlan, error) {
@@ -92,7 +92,24 @@ func (s *Service) applyCurrentFiendWarMove(plan *currentFiendWarMovePlan) error 
 	b.FiendWar = next
 	b.ProgressVersion++
 	plan.applied = true
+	plan.combatTarget = b.FiendWar.AreaOpen(plan.to) && b.FiendWar.Areas[plan.to].Group == 0
 	return nil
+}
+func (s *Service) publishCurrentFiendWarMoveProjection(plan *currentFiendWarMovePlan) {
+	if s == nil || plan == nil || plan.instance == "" {
+		return
+	}
+	s.raidMu.Lock()
+	state := s.raids[plan.raid]
+	var snapshot runtimeRaidState
+	ok := state != nil && state.Battle != nil && state.Battle.InstanceID == plan.instance && state.Battle.FiendWar != nil
+	if ok {
+		snapshot = cloneRuntimeRaidState(*state)
+	}
+	s.raidMu.Unlock()
+	if ok {
+		s.queueCurrentRaidDungeonProgress(snapshot)
+	}
 }
 func (s *Service) cancelCurrentFiendWarMove(plan *currentFiendWarMovePlan) {
 	if plan == nil || !plan.applied || plan.confirmed {

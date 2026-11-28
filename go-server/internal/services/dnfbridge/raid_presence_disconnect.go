@@ -126,10 +126,12 @@ func (s *Service) noteCurrentRaidDisconnect(identity boundGameSessionCharacter) 
 	}
 	s.currentRaidDisconnects[identity.character] = currentRaidDisconnectSeat{Raid: state, RaidKey: state.RaidKey, CharacterID: identity.character, Session: session, Generation: identity.generation, AccountID: account, InstanceID: instance, DisconnectedAt: now, ExpiresAt: now.Add(time.Duration(seconds) * time.Second)}
 	state.Members[idx].UserState = 0
+	state.Members[idx].DisconnectedAt = now
 	s.mu.Unlock()
 	copy := cloneRuntimeRaidState(*state)
 	s.raidMu.Unlock()
 	s.publishCurrentRaidPresence(copy, identity.character)
+	_ = s.tryReleaseCurrentRaidMovieBarrier(copy)
 }
 func (s *Service) restoreCurrentRaidPresence(session *gameSession) {
 	if s == nil || session == nil || s.options.currentClientVersion != "official-24.9" {
@@ -182,7 +184,9 @@ func (s *Service) restoreCurrentRaidPresence(session *gameSession) {
 		b.FiendWar = next
 		b.ProgressVersion++
 	}
-	state.Members[runtimeRaidMemberIndex(*state, identity.character)].UserState = 1
+	memberIdx := runtimeRaidMemberIndex(*state, identity.character)
+	state.Members[memberIdx].UserState = 1
+	state.Members[memberIdx].DisconnectedAt = time.Time{}
 	s.mu.Unlock()
 	copy := cloneRuntimeRaidState(*state)
 	s.raidMu.Unlock()
@@ -212,7 +216,9 @@ func (s *Service) expireCurrentRaidDisconnectSeats(now time.Time) {
 		online := current != nil && current != seat.Session && current.selectedCharacterID == id && current.loginPacketSeen && current.accountFromToken && strings.TrimSpace(current.accountID) == seat.AccountID && s.raidPresenceContext(current, *state, seat.AccountID)
 		if online && !now.Before(seat.DisconnectedAt) && now.Before(seat.ExpiresAt) {
 			delete(s.currentRaidDisconnects, id)
-			state.Members[runtimeRaidMemberIndex(*state, id)].UserState = 1
+			memberIdx := runtimeRaidMemberIndex(*state, id)
+			state.Members[memberIdx].UserState = 1
+			state.Members[memberIdx].DisconnectedAt = time.Time{}
 			s.mu.Unlock()
 			changed[state.RaidKey] = cloneRuntimeRaidState(*state)
 			continue

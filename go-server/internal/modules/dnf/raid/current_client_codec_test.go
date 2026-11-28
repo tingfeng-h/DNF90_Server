@@ -92,7 +92,7 @@ func boolFixture(v bool) uint32 {
 func TestCurrentRaidCodecRejectsInvalidOwnersAndNativeBufferOverflow(t *testing.T) {
 	members := currentCodecFixtureMembers(2)
 	for _, members := range [][]CurrentMemberRecord{
-		{{Core: MemberRecord{CharKey: 0}}},
+		{{Core: MemberRecord{CharKey: 0, Field4: 1}}},
 		{members[0], members[0]},
 		currentCodecFixtureMembers(21),
 		{{Core: members[0].Core, ExtraName: strings.Repeat("界", 17)}},

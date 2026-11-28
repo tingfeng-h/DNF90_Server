@@ -99,8 +99,19 @@ type CurrentMetadata struct {
 	Members   []CurrentMemberRecord
 }
 
+func currentMemberWireValid(member CurrentMemberRecord) bool {
+	return member.Core.CharKey != 0 || member.Core.Field4 == 0
+}
+
+func currentMemberMatchesLeader(member, leader CurrentMemberRecord) bool {
+	if leader.Core.CharKey != 0 {
+		return member.Core.CharKey == leader.Core.CharKey
+	}
+	return member.Core.CharKey == 0 && member.Core.Field4 == 0 && member.Core.Field66BoolSource != 0 && member.Core.Name == leader.Core.Name
+}
+
 func writeCurrentMemberRecord(writer *packetWriter, member CurrentMemberRecord) error {
-	if member.Core.CharKey == 0 {
+	if !currentMemberWireValid(member) {
 		return fmt.Errorf("current raid member has no character owner")
 	}
 	// The native second DSTR uses a 17-wide-character buffer, including NUL.
@@ -126,10 +137,12 @@ func writeCurrentRoster(writer *packetWriter, members []CurrentMemberRecord) err
 	seen := make(map[uint16]bool, len(members))
 	writer.writeByte(byte(len(members)))
 	for _, member := range members {
-		if seen[member.Core.CharKey] {
-			return fmt.Errorf("current raid roster repeats character owner")
+		if member.Core.CharKey != 0 {
+			if seen[member.Core.CharKey] {
+				return fmt.Errorf("current raid roster repeats character owner")
+			}
+			seen[member.Core.CharKey] = true
 		}
-		seen[member.Core.CharKey] = true
 		if err := writeCurrentMemberRecord(writer, member); err != nil {
 			return err
 		}
@@ -151,13 +164,13 @@ func BuildCurrentMemberRefreshMode3Body(raidKey uint32, members []CurrentMemberR
 }
 
 func BuildCurrentMetadataBody(info CurrentMetadata, mode uint32) ([]byte, error) {
-	if info.RaidKey == 0 || info.Leader.Core.CharKey == 0 || (mode != 0 && mode != 2) {
+	if info.RaidKey == 0 || !currentMemberWireValid(info.Leader) || (mode != 0 && mode != 2) {
 		return nil, fmt.Errorf("current raid metadata has no owner or invalid mode")
 	}
 	if mode == 0 {
 		found := false
 		for _, member := range info.Members {
-			found = found || member.Core.CharKey == info.Leader.Core.CharKey
+			found = found || currentMemberMatchesLeader(member, info.Leader)
 		}
 		if !found {
 			return nil, fmt.Errorf("current raid leader missing from roster")
@@ -199,9 +212,9 @@ func BuildCurrentInfoReplyBody(info CurrentMetadata, selector byte) ([]byte, err
 	if selector == 2 {
 		found := false
 		for _, member := range info.Members {
-			found = found || member.Core.CharKey == info.Leader.Core.CharKey
+			found = found || currentMemberMatchesLeader(member, info.Leader)
 		}
-		if info.Leader.Core.CharKey == 0 || !found {
+		if !currentMemberWireValid(info.Leader) || !found {
 			return nil, fmt.Errorf("current raid info leader missing from roster")
 		}
 	}
@@ -236,11 +249,13 @@ func BuildCurrentDirectoryBody(entries []CurrentMetadata) ([]byte, error) {
 		leaderFound := false
 		members := make(map[uint16]bool, len(entry.Members))
 		for _, member := range entry.Members {
-			if member.Core.CharKey == 0 || members[member.Core.CharKey] {
+			if !currentMemberWireValid(member) || (member.Core.CharKey != 0 && members[member.Core.CharKey]) {
 				return nil, fmt.Errorf("invalid current raid directory member owner")
 			}
-			members[member.Core.CharKey] = true
-			leaderFound = leaderFound || member.Core.CharKey == entry.Leader.Core.CharKey
+			if member.Core.CharKey != 0 {
+				members[member.Core.CharKey] = true
+			}
+			leaderFound = leaderFound || currentMemberMatchesLeader(member, entry.Leader)
 		}
 		if !leaderFound {
 			return nil, fmt.Errorf("current raid directory leader missing from members")

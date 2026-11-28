@@ -36,7 +36,7 @@ func (s *Service) sendCurrentRaidMovieSkipPrompt(session *gameSession, captured 
 	// window exists. Failure input can arrive before that window is ready;
 	// a successful socket write is not a client completion receipt. Allow a
 	// bounded retry on later input, without changing the failure/return owner.
-	retry := b.TimedOut && o.moviePromptSent && !now.Before(o.moviePromptAt.Add(time.Second))
+	retry := o.moviePromptSent && !now.Before(o.moviePromptAt.Add(300*time.Millisecond))
 	prompt := !o.movieCompleted && (!o.moviePromptSent || retry)
 	if prompt {
 		packets = append(packets, currentAntonRewardPacket{opcode: 599})

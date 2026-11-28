@@ -612,8 +612,12 @@ func (s *Service) handleTownSetUserAreaWithCommit(session *gameSession, body []b
 	if fplan != nil {
 		fplan.confirmed = true
 		if fplan.instance != "" {
-			copy := *fplan
-			session.fiendWarPendingMove = &copy
+			if fplan.combatTarget {
+				copy := *fplan
+				session.fiendWarPendingMove = &copy
+			} else {
+				session.fiendWarPendingMove = nil
+			}
 			// op36 already supplied the destination coordinates and op24 has
 			// successfully committed them. The generic scene reset above
 			// intentionally discarded the previous area's op35 position; retain
@@ -624,6 +628,7 @@ func (s *Service) handleTownSetUserAreaWithCommit(session *gameSession, body []b
 			session.townPositionSnapshot.MovementCode = request.Direction
 			session.townPositionSnapshot.PositionValid = true
 		}
+		s.publishCurrentFiendWarMoveProjection(fplan)
 		s.queueCurrentFiendWarEncounterFrom(session, currentFiendWarAdmissionPhaseTownArea)
 	}
 	if townMapPathLooksLikeGuildHall(area.MapPath) && !s.currentGuildHallArea(byte(previous.Stats["town_id"]), byte(previous.Stats["area_id"])) {

@@ -115,6 +115,14 @@ func cloneCurrentAntonRewardFlow(f *currentAntonRewardFlow) *currentAntonRewardF
 // timer in native stage4 before the team panel can replace it. Cinematic
 // fallbacks and the final team-display completion still use their own windows.
 const currentRaidNativeCardChoiceWindow = 15 * time.Second
+const currentFiendWarNativeCardChoiceWindow = 4 * time.Second
+
+func currentRaidNativeCardChoiceWindowForMode(mode byte) time.Duration {
+	if mode == 3 {
+		return currentFiendWarNativeCardChoiceWindow
+	}
+	return currentRaidNativeCardChoiceWindow
+}
 
 func (s *Service) markCurrentRaidPartySelectionShownLocked(instance string, phase byte, character uint16, at time.Time) {
 	f := s.antonRewardFlows[currentAntonFlowKey(instance, phase)]
@@ -129,7 +137,7 @@ func (s *Service) markCurrentRaidPartySelectionShownLocked(instance string, phas
 			f.PartySelectAfter = make(map[uint16]time.Time)
 		}
 		if _, exists := f.PartySelectAfter[character]; !exists {
-			f.PartySelectAfter[character] = at.Add(currentRaidNativeCardChoiceWindow)
+			f.PartySelectAfter[character] = at.Add(currentRaidNativeCardChoiceWindowForMode(f.Mode))
 		}
 		return
 	}

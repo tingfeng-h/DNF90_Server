@@ -93,8 +93,11 @@ func (s *Service) sendCurrentAntonTerminalResult(session *gameSession, captured 
 	packets := []currentRaidProjectionPacket{{opcode: 601, body: result.Body}}
 	if b.FiendWar != nil {
 		if result.Failed {
-			// 现用1484状态6立即读取601提交的结果类型，必须排在601之后。
-			packets = append(packets, currentRaidProjectionPacket{opcode: currentFiendWarStateNotice, body: []byte{6, 0}})
+			// 现用1484状态6立即读取601提交的结果类型并播报失败文案，随后补发1484状态3触发0x18fc850播放超时空失败动画。
+			packets = append(packets,
+				currentRaidProjectionPacket{opcode: currentFiendWarStateNotice, body: []byte{6, 0}},
+				currentRaidProjectionPacket{opcode: currentFiendWarStateNotice, body: []byte{3, 0}},
+			)
 		} else {
 			packets = append([]currentRaidProjectionPacket{{opcode: currentFiendWarStateNotice, body: []byte{3, 0}}}, packets...)
 		}

@@ -115,7 +115,7 @@ func TestR195ChoiceDeadlineScopeAndClone(t *testing.T) {
 			if want {
 				copy := cloneCurrentAntonRewardFlow(flow)
 				copy.PartySelectAfter[19] = at
-				if flow.PartySelectAfter[19] != at.Add(currentRaidNativeCardChoiceWindow) {
+				if flow.PartySelectAfter[19] != at.Add(currentRaidNativeCardChoiceWindowForMode(mode)) {
 					t.Fatal("snapshot aliases live owner deadlines")
 				}
 			}
