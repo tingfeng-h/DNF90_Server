@@ -1,0 +1,12 @@
+{
+  "mode": "enforce",
+  "versions": [
+    {
+      "label": "v212-official-24.9-20261125",
+      "exe": "989393eb5347a75ec724e7ac1026c90c6c25061f6ba3c1ac6effe56267f3bc80",
+      "pvf": "ba47ded2d101f124797833efef0bda4cb02f8f9b6be5d023b449cf5aa7c4ae69",
+      "launcher": "13736a1ca69795016cf79d6c81412e512e95bc7789d42ee14a682e3c4a0237e4",
+      "note": "2026-11-25 实测；V212 官方 24.9 客户端。旧版本一律拒绝"
+    }
+  ]
+}
